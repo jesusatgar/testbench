@@ -1,8 +1,25 @@
 # testbench
 
-## Diagnóstico Pico (prueba de concepto WebUSB)
+## Pico Bench: headset diagnostics over WebUSB (proof of concept)
 
-Página en `docs/` que se conecta por ADB (WebUSB) a un visor Pico y vuelca batería, térmica, sensores y propiedades del sistema. Solo lectura.
+A static web page (`docs/`) that connects to a Pico headset over ADB using WebUSB and lets you explore every system property (`getprop`) in detail, plus battery, storage, memory, thermal and sensor output. Read-only: it never changes anything on the headset.
 
-- Requiere Chrome o Edge, HTTPS (o localhost), driver WinUSB en Windows y ningún servidor ADB abierto (`adb kill-server`).
-- `docs/main.js` es el bundle generado a partir de `src/main.js` con esbuild (dependencias: `@yume-chan/adb`, `@yume-chan/adb-daemon-webusb`, `@yume-chan/adb-credential-web`).
+- **Properties**: searchable list of all `getprop` entries, grouped by category (Pico / XR, Build, Product, Security, Display, Hardware, Network, Services...), with a detail panel (meaning, type, interpreted value, related properties) and JSON / CSV export.
+- **Overview**: identity, platform, battery and resources at a glance.
+- **Raw output**: the unprocessed output of every command that was run.
+- **Load sample data** shows the interface with fictional data, no headset needed.
+
+### Requirements
+
+- Chrome or Edge, served over HTTPS (or `localhost`).
+- USB debugging enabled on the headset.
+- Windows: the WinUSB driver for the ADB interface (for example via Zadig), and no other ADB server running (`adb kill-server`, close SideQuest / Android Studio).
+
+### Build
+
+```
+npm install
+npx esbuild src/main.js --bundle --minify --format=iife --target=chrome110 --outfile=docs/main.js
+```
+
+`docs/index.html` and `docs/main.js` are what GitHub Pages serves.
