@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Diagnóstico Pico · Prueba de concepto</title>
+<style>
+  body{font:15px system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;color:#1b1f24}
+  button{font:inherit;padding:.5rem 1rem;margin-right:.5rem;border:1px solid #888;border-radius:6px;background:#f3f4f6;cursor:pointer}
+  button:disabled{opacity:.4;cursor:default}
+  #status{margin:1rem 0;padding:.6rem .8rem;border-radius:6px;background:#eef;}
+  #status.ok{background:#e3f6e8}#status.err{background:#fde8e8}
+  table{border-collapse:collapse;margin:1rem 0;width:100%}
+  th,td{text-align:left;padding:.35rem .6rem;border-bottom:1px solid #ddd}
+  th{width:45%;font-weight:600}
+  pre{background:#111;color:#ddd;padding:.7rem;overflow:auto;max-height:300px;font-size:12px}
+  details{margin:.3rem 0}
+</style>
+</head>
+<body>
+<h1>Diagnóstico Pico — prueba de concepto (WebUSB)</h1>
+<p>1) Activa la depuración USB en el visor. 2) Conéctalo por USB. 3) Pulsa «Conectar».</p>
+<button id="connect">1. Conectar visor</button>
+<button id="run" disabled>2. Ejecutar diagnóstico</button>
+<button id="download" disabled>3. Descargar JSON</button>
+<div id="status">Esperando conexión…</div>
+<table id="summary"></table>
+<div id="out"></div>
+<script src="main.js"></script>
+</body>
+</html>
