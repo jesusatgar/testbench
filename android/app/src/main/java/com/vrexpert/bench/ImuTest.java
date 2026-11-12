@@ -41,7 +41,7 @@ final class ImuTest {
         if (acc == null && gyr == null) {
             // Pico OS can keep the IMU private to its tracking service, so this is not a fault.
             return r.set("na", "Not exposed", "Android lists " + all.size()
-                    + " sensors but no accelerometer or gyroscope for regular apps. This firmware may keep the IMU private, so it is not a fault. The sensor list was saved in the results.");
+                    + " sensors but no accelerometer or gyroscope for regular apps. This firmware may keep the IMU private, so it is not a fault. The orientation drift test covers the IMU indirectly. The sensor list was saved in the results.");
         }
 
         final List<float[]> a = new ArrayList<>();

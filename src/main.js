@@ -562,24 +562,36 @@ function computeChecks() {
       return k ? dump.events[k] : null;
     };
     const age = (ev) => (dump.captured == null ? 0 : (dump.captured - ev[ev.length - 1].at + 86400) % 86400);
+    const ago = (s) => (s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`);
     const gev = recent(/gyroscope/i, /uncal|corrected|bias/i);
-    if (!gev) missing("Sensors", "Gyroscope at rest", "No recent gyroscope readings. The sensor is idle.");
-    else if (age(gev) > 120) missing("Sensors", "Gyroscope at rest", `Last reading is ${Math.round(age(gev) / 60)} min old.`);
-    else {
-      const st = vecStats(gev.map((e) => e.v));
-      if (st.noise > LIMITS.gyroMoving) missing("Sensors", "Gyroscope at rest", "The headset was moving. Leave it on a still surface and read again.");
-      else add("Sensors", "Gyroscope at rest", level(st.mag, LIMITS.gyroBias), `bias ${st.mag.toFixed(3)} rad/s`,
-        `Mean of ${gev.length} live readings. Warning from ${LIMITS.gyroBias[0]} rad/s, failure from ${LIMITS.gyroBias[1]} rad/s.`);
-    }
     const aev = recent(/accelerometer/i, /uncal/i);
-    if (!aev) missing("Sensors", "Accelerometer at rest", "No recent accelerometer readings. The sensor is idle.");
-    else if (age(aev) > 300) missing("Sensors", "Accelerometer at rest", `Last reading is ${Math.round(age(aev) / 60)} min old. Run the device tests for a fresh reading.`);
+    const aStat = aev ? vecStats(aev.map((e) => e.v)) : null;
+    const aAge = aev ? age(aev) : null;
+
+    // Pico only keeps the gyroscope running now and then, so a reading a few minutes old is still evidence.
+    // A bad value is reported even if it is old; a good value must be fresh to count.
+    if (!gev) missing("Sensors", "Gyroscope at rest", "No recent gyroscope readings. The sensor is idle.");
     else {
-      const st = vecStats(aev.map((e) => e.v));
-      if (st.noise > LIMITS.accMoving) missing("Sensors", "Accelerometer at rest", "The headset was moving. Leave it on a still surface and read again.");
-      else add("Sensors", "Accelerometer at rest", Math.abs(st.mag - 9.81) > LIMITS.gravityTolerance ? "warn" : "ok", `${st.mag.toFixed(2)} m/s²`,
-        `Should read about 9.81 m/s² at rest (±${LIMITS.gravityTolerance}).`);
+      const gAge = age(gev), st = vecStats(gev.map((e) => e.v));
+      const deg = (st.mag * 180 / Math.PI).toFixed(1);
+      const stale = gAge > 120;
+      if (st.noise > LIMITS.gyroMoving) missing("Sensors", "Gyroscope at rest", "The headset was moving. Leave it on a still surface and read again.");
+      else if (stale && (gAge > 900 || st.mag <= LIMITS.gyroBias[0])) missing("Sensors", "Gyroscope at rest", `Last reading is ${ago(gAge)} old.`);
+      else {
+        const stillNote = aStat && aAge < 900 && aStat.noise < LIMITS.accMoving
+          ? ` The accelerometer reads steady (noise ${aStat.noise.toFixed(2)} m/s²), so the headset was not being moved.` : "";
+        add("Sensors", "Gyroscope at rest", level(st.mag, LIMITS.gyroBias), `bias ${st.mag.toFixed(3)} rad/s (${deg}°/s)`,
+          (st.mag > LIMITS.gyroBias[0]
+            ? `Should be close to 0 at rest. A constant offset like this makes the view drift. Pico recalibration may fix it; if not, the IMU is faulty.`
+            : `Mean of ${gev.length} readings. Warning from ${LIMITS.gyroBias[0]} rad/s, failure from ${LIMITS.gyroBias[1]} rad/s.`)
+          + stillNote + (stale ? ` Reading is ${ago(gAge)} old.` : ""));
+      }
     }
+    if (!aev) missing("Sensors", "Accelerometer at rest", "No recent accelerometer readings. The sensor is idle.");
+    else if (aAge > 900) missing("Sensors", "Accelerometer at rest", `Last reading is ${ago(aAge)} old. Run the device tests for a fresh reading.`);
+    else if (aStat.noise > LIMITS.accMoving) missing("Sensors", "Accelerometer at rest", "The headset was moving. Leave it on a still surface and read again.");
+    else add("Sensors", "Accelerometer at rest", Math.abs(aStat.mag - 9.81) > LIMITS.gravityTolerance ? "warn" : "ok", `${aStat.mag.toFixed(2)} m/s²`,
+      `Should read about 9.81 m/s² at rest (±${LIMITS.gravityTolerance}).` + (aAge > 120 ? ` Reading is ${ago(aAge)} old.` : ""));
     if (prox) add("Sensors", "Proximity sensor", "ok", "Listed", `${label(prox)}. Detects the headset being worn.`);
     else missing("Sensors", "Proximity sensor", "Not listed by this firmware.");
   }
@@ -649,7 +661,7 @@ function benchPanel() {
   return el("section", { class: "bench" },
     el("div", {},
       el("h2", { text: "Device tests" }),
-      el("p", { text: "Installs a small test app on the headset and measures motion sensors, proximity sensor, speakers and microphone, storage and CPU under load. Place the headset on a still surface, do not wear it, and keep it above 30% or plugged in." })),
+      el("p", { text: "Installs a small test app on the headset and measures orientation drift, proximity sensor, speakers and microphone, storage and CPU under load. Place the headset on a still surface, do not wear it, and keep it above 30% or plugged in." })),
     el("div", { class: "bench-controls" }, sel, btn, status ? el("span", { class: "bench-status", text: status }) : null));
 }
 

@@ -16,6 +16,7 @@ export const SAMPLE_BENCH = {
   device: { model: "SAMPLE-XR1" },
   tests: [
     { id: "imu", name: "Motion sensors (IMU)", status: "ok", value: "gravity 9.79 m/s², gyro bias 0.004 rad/s", detail: "Sampling at 498 Hz (accel) and 501 Hz (gyro), low noise at rest.", metrics: {} },
+    { id: "drift", name: "Orientation drift at rest", status: "ok", value: "0.04 °/s", detail: "The orientation stayed steady for 9 s (game rotation vector).", metrics: {} },
     { id: "proximity", name: "Proximity sensor", status: "ok", value: "Listed", detail: "Sample proximity, range 5.0.", metrics: {} },
     { id: "audio", name: "Speakers and microphone", status: "ok", value: "left +31 dB, right +29 dB over noise", detail: "Both speakers and the microphone responded.", metrics: {} },
     { id: "storage", name: "Storage speed and integrity", status: "ok", value: "write 212 MB/s, read 540 MB/s", detail: "64 MB written and read back without errors.", metrics: {} },

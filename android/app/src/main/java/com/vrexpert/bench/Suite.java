@@ -20,7 +20,7 @@ final class Suite {
     static final String TAG = "VREBENCH";
     static final String VERSION = "0.1.0";
     // Stress goes last: it heats the headset and would skew the other tests.
-    static final List<String> ALL = Arrays.asList("imu", "proximity", "audio", "storage", "stress");
+    static final List<String> ALL = Arrays.asList("imu", "drift", "proximity", "audio", "storage", "stress");
 
     static File outputDir(Context c) {
         File d = c.getExternalFilesDir(null);
@@ -42,6 +42,7 @@ final class Suite {
             try {
                 switch (id) {
                     case "imu": r = ImuTest.run(c, imuSeconds); break;
+                    case "drift": r = DriftTest.run(c, Math.max(imuSeconds, 15)); break;
                     case "proximity": r = ProximityTest.run(c); break;
                     case "audio": r = AudioTest.run(c); break;
                     case "storage": r = StorageTest.run(c); break;
