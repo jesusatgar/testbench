@@ -4,21 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>VR Expert Diagnostics</title>
+<meta name="theme-color" content="#ff6a00">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-/* ===== VR Expert brand tokens: replace these values with the official palette ===== */
+/* ===== VR Expert brand tokens: orange + white (light) / orange + black (dark) ===== */
 :root{
-  --brand:#2446e8;        /* primary: buttons, active tab, links */
-  --brand-ink:#ffffff;    /* text on brand */
-  --brand-soft:#e6ebff;   /* tinted selection background */
-  --ink:#12151f;          /* main text */
-  --bg:#f6f7fb;           /* page */
-  --surface:#ffffff;      /* panels */
-  --sunken:#eef0f6;       /* code, inputs */
-  --muted:#5a6275;        /* secondary text */
-  --line:#dde1ec;         /* dividers */
+  --brand:#ff6a00;        /* orange: buttons, active tab, selection */
+  --brand-ink:#111111;    /* text on orange */
+  --brand-text:#c24a00;   /* orange used as text on white (readable) */
+  --brand-soft:#fff0e4;   /* tinted selection background */
+  --ink:#111111;
+  --bg:#f7f7f7;
+  --surface:#ffffff;
+  --sunken:#f0f0f0;
+  --muted:#5c5c5c;
+  --line:#e2e2e2;
 }
 /* ===== status colours (semantic, independent of the brand) ===== */
 :root{
@@ -31,13 +33,13 @@
   --mono:"JetBrains Mono",ui-monospace,"Cascadia Code",Consolas,monospace;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --brand:#7d95ff; --brand-ink:#0b1030; --brand-soft:#1c2455;
-  --ink:#eceef6; --bg:#0d1017; --surface:#151923; --sunken:#1c212d; --muted:#9aa2b6; --line:#272d3b;
+  --brand:#ff7a1a; --brand-ink:#111111; --brand-text:#ff8a3d; --brand-soft:#3a210f;
+  --ink:#f5f5f5; --bg:#0a0a0a; --surface:#141414; --sunken:#1d1d1d; --muted:#a3a3a3; --line:#2a2a2a;
   --ok:#5fd68c; --ok-bg:#12301f; --warn:#f2b551; --warn-bg:#35280d; --bad:#ff8a7e; --bad-bg:#3b1815; --na:#8b93a7; --na-bg:#232836; --mark:#6b5a12;
   color-scheme:dark}}
 :root[data-theme="dark"]{
-  --brand:#7d95ff; --brand-ink:#0b1030; --brand-soft:#1c2455;
-  --ink:#eceef6; --bg:#0d1017; --surface:#151923; --sunken:#1c212d; --muted:#9aa2b6; --line:#272d3b;
+  --brand:#ff7a1a; --brand-ink:#111111; --brand-text:#ff8a3d; --brand-soft:#3a210f;
+  --ink:#f5f5f5; --bg:#0a0a0a; --surface:#141414; --sunken:#1d1d1d; --muted:#a3a3a3; --line:#2a2a2a;
   --ok:#5fd68c; --ok-bg:#12301f; --warn:#f2b551; --warn-bg:#35280d; --bad:#ff8a7e; --bad-bg:#3b1815; --na:#8b93a7; --na-bg:#232836; --mark:#6b5a12;
   color-scheme:dark}
 
@@ -58,7 +60,7 @@ header{display:flex;align-items:center;gap:16px;padding:12px 20px;background:var
 .btn:hover:not(:disabled){border-color:var(--brand)}
 .btn:disabled{opacity:.45;cursor:default}
 .btn.primary{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
-.link{background:none;border:0;padding:0;color:var(--brand);font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.link{background:none;border:0;padding:0;color:var(--brand-text);font-weight:600;text-decoration:underline;text-underline-offset:2px}
 
 #progress{height:2px;background:transparent}
 #progress.busy{background:linear-gradient(90deg,var(--brand) 40%,transparent 40%) 0 0/200% 100%;animation:slide 1.1s linear infinite}
@@ -148,7 +150,7 @@ mark{background:var(--mark);color:inherit;border-radius:2px}
 .drawer dl{display:grid;grid-template-columns:84px 1fr;gap:8px 12px;margin:6px 0 0}
 .drawer dt{color:var(--muted)} .drawer dd{margin:0;min-width:0;word-break:break-word}
 .related button{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:5px 0;font:12px var(--mono);color:var(--muted);word-break:break-all}
-.related button:hover{color:var(--brand)}
+.related button:hover{color:var(--brand-text)}
 
 /* ---- raw ---- */
 details{border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px}
