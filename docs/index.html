@@ -107,6 +107,12 @@ main{flex:1;min-height:0;display:flex}
 .check.compact .n{font-weight:500}
 dl.kv{margin:0;display:grid;grid-template-columns:auto 1fr;gap:7px 14px}
 dl.kv dt{color:var(--muted)} dl.kv dd{margin:0;text-align:right;word-break:break-word}
+.bench{display:flex;gap:18px 28px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-top:18px;padding:16px 20px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.bench h2{font-size:15px;margin-bottom:4px}
+.bench p{color:var(--muted);max-width:62ch;font-size:13px}
+.bench-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.bench select{background:var(--sunken);border:1px solid transparent;border-radius:6px;color:var(--ink);padding:7px 10px;font:inherit}
+.bench-status{color:var(--muted);font-size:13px}
 .scope{margin-top:26px;color:var(--muted);font-size:13px;max-width:70ch}
 .empty{margin:12vh auto 0;max-width:420px;text-align:center}
 .empty h1{font-size:22px;letter-spacing:-.01em;margin-bottom:8px}
@@ -206,6 +212,7 @@ details pre{margin:0;padding:12px 14px;border-top:1px solid var(--line);font:12p
   </section>
   <section class="view" id="v-raw"><div class="page"><div class="wrap" id="raw"></div></div></section>
 </main>
-<script src="main.js?v=4"></script>
+<input type="file" id="apk" accept=".apk" hidden>
+<script src="main.js?v=5"></script>
 </body>
 </html>

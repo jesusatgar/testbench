@@ -1,7 +1,7 @@
 import { Adb, AdbDaemonTransport } from "@yume-chan/adb";
 import AdbWebCredentialStore from "@yume-chan/adb-credential-web";
 import { AdbDaemonWebUsbDeviceManager } from "@yume-chan/adb-daemon-webusb";
-import { SAMPLE_PROPS, SAMPLE_RAW } from "./sample.js";
+import { SAMPLE_PROPS, SAMPLE_RAW, SAMPLE_BENCH } from "./sample.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -26,7 +26,26 @@ const state = {
   kind: "all",
   q: "",
   selected: null,
+  bench: null,       // parsed result.json from the on-device test app
+  benchRun: null,    // {text} while the tests are running
+  stressSec: 120,
 };
+
+/* ---------- model profiles ---------- */
+
+// Which headset family this is. `tested` marks profiles validated on real hardware.
+const PROFILES = [
+  { id: "g3", re: /\bg3\b|pico[ _-]?g3/i, label: "Pico G3", tested: false,
+    note: "The G3 is a 3DoF headset, so it has no tracking cameras to test." },
+  { id: "neo3", re: /neo[ _-]?3/i, label: "Pico Neo 3", tested: false, note: "" },
+  { id: "p4u", re: /ultra/i, label: "Pico 4 Ultra Enterprise", tested: false, note: "" },
+  { id: "p4e", re: /pico[ _-]?4|\bp4\b/i, label: "Pico 4 Enterprise", tested: false, note: "" },
+];
+
+function profile() {
+  const id = [prop("ro.product.model"), prop("ro.product.device"), prop("ro.product.name")].join(" ");
+  return PROFILES.find((p) => p.re.test(id)) || null;
+}
 
 /* ---------- classification ---------- */
 
@@ -487,6 +506,8 @@ function computeChecks() {
     add("Sensors", "Motion sensors", lost.length ? "fail" : "ok", lost.length ? "Missing" : "Accelerometer, gyroscope", lost.length ? `Not listed: ${lost.join(", ")}.` : "Both are registered with the system. Accuracy needs the on-device test.");
     add("Sensors", "Proximity sensor", has(/proxim/i) ? "ok" : "warn", has(/proxim/i) ? "Listed" : "Not listed", "The sensor that detects the headset being worn.");
   }
+  /* Device tests (results from the on-device app) */
+  for (const t of state.bench?.tests || []) add("Device tests", t.name, t.status, t.value, t.detail);
   return checks;
 }
 
@@ -529,6 +550,99 @@ function checkRow(c, compact) {
     c.detail ? el("span", { class: "d", text: c.detail }) : null);
 }
 
+/* ---------- on-device test app ---------- */
+
+const BENCH_PKG = "com.vrexpert.bench";
+const BENCH_DIR = `/sdcard/Android/data/${BENCH_PKG}/files`;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function benchPanel() {
+  const run = state.benchRun;
+  const canRun = !!state.adb && !run;
+  const sel = el("select", { id: "stress", "aria-label": "Stress test length" },
+    ...[[60, "1 min"], [120, "2 min"], [300, "5 min"]].map(([v, t]) => el("option", { value: String(v), text: `Stress ${t}`, ...(v === state.stressSec ? { selected: "" } : {}) })));
+  sel.addEventListener("change", () => { state.stressSec = Number(sel.value); });
+  if (!canRun) sel.setAttribute("disabled", "");
+  const btn = el("button", { class: "btn primary", text: state.bench ? "Run again" : "Run device tests", onclick: runBench });
+  if (!canRun) btn.setAttribute("disabled", "");
+  const status = run ? run.text
+    : !state.adb ? (state.sample ? "Connect a headset to run these." : "")
+    : state.bench ? "Last run is included in the results below." : "";
+  return el("section", { class: "bench" },
+    el("div", {},
+      el("h2", { text: "Device tests" }),
+      el("p", { text: "Installs a small test app on the headset and measures motion sensors, proximity sensor, speakers and microphone, storage and CPU under load. Place the headset on a still surface, do not wear it, and keep it above 30% or plugged in." })),
+    el("div", { class: "bench-controls" }, sel, btn, status ? el("span", { class: "bench-status", text: status }) : null));
+}
+
+async function pushFile(path, bytes) {
+  const sync = await state.adb.sync();
+  try {
+    await sync.write({
+      filename: path,
+      file: new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } }),
+      permission: 0o644,
+    });
+  } finally {
+    await sync.dispose();
+  }
+}
+
+// Uses the APK published next to this page; falls back to a file picker (for example when opened locally).
+async function getApk() {
+  try {
+    const r = await fetch("vre-bench.apk", { cache: "no-store" });
+    if (r.ok) return new Uint8Array(await r.arrayBuffer());
+  } catch { /* fall through */ }
+  const input = $("apk");
+  input.value = "";
+  const picked = new Promise((resolve, reject) => {
+    input.onchange = async () => {
+      const f = input.files[0];
+      if (f) resolve(new Uint8Array(await f.arrayBuffer())); else reject(new Error("No APK selected"));
+    };
+  });
+  input.click();
+  return picked;
+}
+
+async function runBench() {
+  if (!state.adb || state.benchRun) return;
+  const run = (state.benchRun = { text: "Looking for the test app…" });
+  const say = (t) => { run.text = t; renderOverview(); };
+  renderOverview();
+  try {
+    const apk = await getApk();
+    say("Installing the test app…");
+    await pushFile("/data/local/tmp/vre-bench.apk", apk);
+    const inst = await sh("pm install -r -g -t /data/local/tmp/vre-bench.apk");
+    await sh("rm -f /data/local/tmp/vre-bench.apk");
+    if (!/Success/.test(inst)) throw new Error("install failed: " + inst);
+    await sh(`rm -f ${BENCH_DIR}/result.json`);
+    const started = await sh(`am start-foreground-service -n ${BENCH_PKG}/.BenchService --es suite all --ei stress ${state.stressSec}`);
+    if (/Error|Exception/i.test(started)) throw new Error(started);
+
+    const deadline = Date.now() + (state.stressSec + 240) * 1000;
+    let doc = null;
+    while (Date.now() < deadline) {
+      await sleep(3000);
+      const txt = await sh(`cat ${BENCH_DIR}/result.json 2>/dev/null`);
+      if (!txt) continue;
+      try { doc = JSON.parse(txt); } catch { continue; }
+      if (doc.state === "done") break;
+      say(`Running ${doc.current || "tests"} (${Math.min(doc.index + 1, doc.total)} of ${doc.total})…`);
+    }
+    if (!doc || doc.state !== "done") throw new Error("the tests did not finish in time");
+    state.bench = doc;
+    setStatus("");
+  } catch (e) {
+    setStatus("Device tests failed: " + e, "err");
+  } finally {
+    state.benchRun = null;
+    renderAll();
+  }
+}
+
 function renderOverview() {
   const o = $("overview");
   if (!state.props.length) {
@@ -567,9 +681,13 @@ function renderOverview() {
   ];
   for (const [k, val] of info) if (val) dl.append(el("dt", { text: k }), el("dd", { text: val }));
 
-  o.replaceChildren(verdict,
+  const prof = profile();
+  if (prof) dl.prepend(el("dt", { text: "Profile" }), el("dd", { text: prof.label + (prof.tested ? "" : " (not validated yet)") }));
+  const scope = "Not covered yet: display (dead pixels), controllers and tracking. Those need a VR test scene." + (prof?.note ? " " + prof.note : "");
+
+  o.replaceChildren(verdict, benchPanel(),
     el("div", { class: "cols" }, left, el("aside", {}, el("h2", { text: "Device", style: "font-size:15px;margin-bottom:10px" }), dl)),
-    el("p", { class: "scope", text: "These are software-level checks read over ADB. Cameras, tracking, controllers, display and audio need the on-device test app, which is not built yet." }));
+    el("p", { class: "scope", text: scope }));
 }
 
 function renderRaw() {
@@ -623,6 +741,7 @@ async function readAll() {
   setStatus("", "busy");
   state.props = parseGetprop(await sh("getprop"));
   state.raw = {};
+  state.bench = null;
   renderAll();
   for (const [label, cmd] of RAW_COMMANDS) {
     setStatus("", "busy");
@@ -638,6 +757,7 @@ function loadSample() {
   state.serial = "SAMPLE0000";
   state.props = parseGetprop(SAMPLE_PROPS);
   state.raw = { ...SAMPLE_RAW };
+  state.bench = SAMPLE_BENCH;
   $("refresh").disabled = true;
   renderAll();
   setStatus("");
@@ -668,7 +788,7 @@ document.querySelectorAll("nav [data-tab]").forEach((b) => b.addEventListener("c
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === "v-" + b.dataset.tab));
 }));
 $("exp-json").onclick = () =>
-  download(`props-${stamp()}.json`, JSON.stringify({ date: new Date().toISOString(), sample: state.sample, properties: Object.fromEntries(state.props.map((p) => [p.key, p.value])), raw: state.raw }, null, 2), "application/json");
+  download(`props-${stamp()}.json`, JSON.stringify({ date: new Date().toISOString(), sample: state.sample, properties: Object.fromEntries(state.props.map((p) => [p.key, p.value])), raw: state.raw, deviceTests: state.bench }, null, 2), "application/json");
 $("exp-csv").onclick = () => {
   const esc = (s) => `"${String(s).replace(/"/g, '""')}"`;
   download(`props-${stamp()}.csv`, ["key,value,category", ...state.props.map((p) => [p.key, p.value, p.cat].map(esc).join(","))].join("\n"), "text/csv");

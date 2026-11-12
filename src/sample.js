@@ -9,3 +9,16 @@ export const SAMPLE_RAW = {
   "Sensors": "(sample) Sensor List:\n0x00000001) IMU accelerometer\n0x00000002) IMU gyroscope\n0x00000003) Proximity\n",
   "Pico packages": "package:com.sample.pico.tracking\npackage:com.sample.pico.launcher\n"
 };
+
+// Fictional sample of the test app's result.json, used by the demo mode.
+export const SAMPLE_BENCH = {
+  schema: 1, app: "0.1.0", state: "done", current: "", index: 5, total: 5,
+  device: { model: "SAMPLE-XR1" },
+  tests: [
+    { id: "imu", name: "Motion sensors (IMU)", status: "ok", value: "gravity 9.79 m/s², gyro bias 0.004 rad/s", detail: "Sampling at 498 Hz (accel) and 501 Hz (gyro), low noise at rest.", metrics: {} },
+    { id: "proximity", name: "Proximity sensor", status: "ok", value: "Listed", detail: "Sample proximity, range 5.0.", metrics: {} },
+    { id: "audio", name: "Speakers and microphone", status: "ok", value: "left +31 dB, right +29 dB over noise", detail: "Both speakers and the microphone responded.", metrics: {} },
+    { id: "storage", name: "Storage speed and integrity", status: "ok", value: "write 212 MB/s, read 540 MB/s", detail: "64 MB written and read back without errors.", metrics: {} },
+    { id: "stress", name: "CPU stress and throttling", status: "warn", value: "max 43.8 °C, throughput −38%", detail: "Performance dropped sharply under load, which suggests thermal throttling.", metrics: {} },
+  ],
+};
