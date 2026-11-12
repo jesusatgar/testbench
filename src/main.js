@@ -678,7 +678,14 @@ async function runBench() {
     const apk = await getApk();
     say("Installing the test app…");
     await pushFile("/data/local/tmp/vre-bench.apk", apk);
-    const inst = await sh("pm install -r -g -t /data/local/tmp/vre-bench.apk");
+    const install = () => sh("pm install -r -g -t /data/local/tmp/vre-bench.apk");
+    let inst = await install();
+    if (/INSTALL_FAILED_UPDATE_INCOMPATIBLE/.test(inst)) {
+      // The installed copy was signed with a different key. Replace it.
+      say("Replacing the previously installed test app…");
+      await sh(`pm uninstall ${BENCH_PKG}`);
+      inst = await install();
+    }
     await sh("rm -f /data/local/tmp/vre-bench.apk");
     if (!/Success/.test(inst)) throw new Error("install failed: " + inst);
     await sh(`rm -f ${BENCH_DIR}/result.json`);

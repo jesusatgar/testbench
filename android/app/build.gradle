@@ -16,6 +16,17 @@ android {
         versionName '0.1.0'
     }
 
+    // A fixed key (not a secret: this is a sideloaded internal tool) so every build is signed
+    // the same way and can update the version already installed on a headset.
+    signingConfigs {
+        debug {
+            storeFile file('vre-debug.keystore')
+            storePassword 'android'
+            keyAlias 'vre'
+            keyPassword 'android'
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
