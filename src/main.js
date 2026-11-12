@@ -8,6 +8,7 @@ const $ = (id) => document.getElementById(id);
 // Read-only commands run on connect. `getprop` feeds the Properties tab.
 const RAW_COMMANDS = [
   ["Battery", "dumpsys battery"],
+  ["Battery sysfs", "for f in cycle_count charge_full charge_full_design capacity; do echo $f=$(cat /sys/class/power_supply/battery/$f 2>/dev/null); done"],
   ["Thermal", "dumpsys thermalservice"],
   ["Storage", "df -h /data"],
   ["Memory", "cat /proc/meminfo"],
@@ -224,10 +225,11 @@ async function copy(text, btn) {
   }
 }
 
+// Progress bar while working; the notice bar only appears for errors.
 function setStatus(msg, kind = "") {
-  const s = $("status");
-  s.textContent = msg;
-  s.className = kind;
+  $("notice").hidden = kind !== "err";
+  if (kind === "err") $("notice").textContent = msg;
+  $("progress").className = kind === "busy" ? "busy" : "";
 }
 
 /* ---------- rendering: properties ---------- */
@@ -246,7 +248,7 @@ function renderCats() {
   const counts = new Map();
   for (const p of state.props) counts.set(p.cat, (counts.get(p.cat) || 0) + 1);
   const side = $("cats");
-  side.replaceChildren(el("h4", { text: "Categories" }));
+  side.replaceChildren();
   const add = (name, label, n) =>
     side.append(
       el("button", {
@@ -264,8 +266,8 @@ function keyNode(key, q) {
   const last = parts.pop();
   const wrap = el("span", { class: "k" });
   if (!q) {
-    if (parts.length) wrap.append(el("span", { class: "seg-dim", text: parts.join(".") + "." }));
-    wrap.append(el("span", { class: "seg-last", text: last }));
+    if (parts.length) wrap.append(el("span", { class: "dim", text: parts.join(".") + "." }));
+    wrap.append(el("span", { class: "last", text: last }));
   } else {
     wrap.append(...highlight(key, q));
   }
@@ -276,23 +278,12 @@ function renderRows() {
   const rows = $("rows");
   const list = filtered();
   const q = state.q.trim();
-  $("meta").textContent = state.props.length
-    ? `${list.length} of ${state.props.length} properties`
-    : "";
-  $("c-props").textContent = state.props.length || "";
   if (!state.props.length) {
-    rows.replaceChildren(
-      el("div", { class: "empty" },
-        el("h2", { text: "No properties loaded" }),
-        el("p", { text: "Connect a headset to read every system property, or explore with sample data." }),
-        el("button", { class: "btn primary", text: "Connect headset", onclick: connect }),
-        el("button", { class: "btn", text: "Load sample data", onclick: loadSample }),
-      ),
-    );
+    rows.replaceChildren(el("div", { class: "msg", text: "Connect a headset to read its system properties." }));
     return;
   }
   if (!list.length) {
-    rows.replaceChildren(el("div", { class: "empty" }, el("h2", { text: "No matches" }), el("p", { text: "Try a shorter search or another category." })));
+    rows.replaceChildren(el("div", { class: "msg", text: "No properties match." }));
     return;
   }
   const frag = document.createDocumentFragment();
@@ -331,8 +322,8 @@ function renderDrawer() {
   const parts = p.key.split(".");
   const crumbs = el("p", { class: "crumbs" });
   parts.forEach((s, i) => {
-    crumbs.append(el("span", { class: i < parts.length - 1 ? "c-dim" : "", text: s }));
-    if (i < parts.length - 1) crumbs.append(el("span", { class: "c-dim", text: "." }));
+    crumbs.append(el("span", { class: i < parts.length - 1 ? "c" : "", text: s }));
+    if (i < parts.length - 1) crumbs.append(el("span", { class: "c", text: "." }));
   });
 
   const interp = interpret(p.key, p.value);
@@ -342,11 +333,10 @@ function renderDrawer() {
 
   const dl = el("dl");
   const row = (t, v) => v && dl.append(el("dt", { text: t }), el("dd", {}, v));
+  row("Meaning", meaning);
   row("Category", p.cat);
   row("Type", p.type);
   row("Scope", pre);
-  row("Meaning", meaning);
-  row("Length", `${p.value.length} chars`);
 
   const refresh = el("button", {
     class: "btn", text: "Re-read live", disabled: state.adb ? null : "",
@@ -370,116 +360,228 @@ function renderDrawer() {
   );
 
   d.replaceChildren(...[
-    el("h3", { text: "Property" }), crumbs,
+    el("div", { class: "top" }, crumbs, el("button", { class: "x", "aria-label": "Close", text: "×", onclick: () => select(null) })),
     el("h3", { text: "Value" }),
     el("div", { class: "valbox", text: p.value === "" ? "(empty string)" : p.value }),
-    interp ? el("div", {}, el("h3", { style: "margin-top:14px", text: "Interpreted" }), el("div", { class: "valbox", text: interp })) : null,
+    interp ? el("div", {}, el("h3", { text: "Interpreted" }), el("div", { class: "valbox", text: interp })) : null,
     actions, dl,
-    sibs.length ? el("div", { class: "related" }, el("h3", { text: `Related · ${parts.slice(0, -1).join(".")}.*` }),
+    sibs.length ? el("div", { class: "related" }, el("h3", { text: "Related properties" }),
       ...sibs.map((s) => el("button", { text: `${s.key.split(".").pop()} = ${s.value || "(empty)"}`, onclick: () => select(s.key) }))) : null,
-    el("button", { class: "btn ghost", style: "margin-top:14px", text: "Close", onclick: () => select(null) }),
   ].filter(Boolean));
 }
 
 /* ---------- rendering: device header, overview, raw ---------- */
 
 function renderDevice() {
-  const d = $("device");
-  d.replaceChildren();
+  const w = $("who");
+  w.replaceChildren();
   if (!state.props.length) return;
-  const chip = (k, v) => v && d.append(el("span", { class: "chip" }, `${k} `, el("b", { text: v })));
-  d.append(el("span", { class: "chip" }, el("span", { class: state.adb ? "dot on" : "dot" }), state.adb ? "connected" : state.sample ? "sample" : "offline"));
-  chip("model", prop("ro.product.model"));
-  chip("serial", prop("ro.serialno") || state.serial);
-  chip("fw", prop("ro.build.display.id"));
+  const bits = [prop("ro.product.model"), prop("ro.serialno") || state.serial, prop("ro.build.display.id")].filter(Boolean);
+  bits.forEach((b, i) => { if (i) w.append(" · "); w.append(i === 0 ? el("b", { text: b }) : b); });
+  if (state.sample) w.append(el("span", { class: "tag", style: "margin-left:8px;background:var(--warn-bg);color:var(--warn)", text: "Sample data" }));
 }
 
-function parseBattery(t) {
-  const g = (re) => t.match(re)?.[1] ?? null;
-  return {
-    level: g(/level:\s*(\d+)/), scale: g(/scale:\s*(\d+)/), temp: g(/temperature:\s*(-?\d+)/),
-    voltage: g(/voltage:\s*(\d+)/), health: g(/health:\s*(\d+)/), status: g(/status:\s*(\d+)/),
-    usb: g(/USB powered:\s*(\w+)/), ac: g(/AC powered:\s*(\w+)/),
-    cycles: g(/(?:cycle count|Charge counter|mCycleCount):\s*(\d+)/i),
-  };
+/* ---------- health checks ---------- */
+
+// Thresholds are starting points. Tune them with data from real headsets.
+const LIMITS = {
+  batteryTemp: [45, 55],      // °C  [warn, fail]
+  batteryCycles: [500, 800],
+  batteryCapacityMin: [80, 70], // % of design capacity, below = warn / fail
+  storageUsed: [90, 97],      // % of /data
+  memoryFreeMin: 10,          // % MemAvailable (warn only)
+  thermal: { 0: [75, 90], 1: [75, 90], 2: [45, 55], 3: [42, 48], 4: [75, 90] }, // by Android temperature type
+  thermalDefault: [75, 90],
+};
+const THERMAL_TYPE = { 0: "CPU", 1: "GPU", 2: "Battery", 3: "Skin", 4: "USB port" };
+const BATTERY_HEALTH = { 1: "Unknown", 2: "Good", 3: "Overheat", 4: "Dead", 5: "Over voltage", 6: "Failure", 7: "Cold" };
+const THERMAL_STATUS = ["None", "Light", "Moderate", "Severe", "Critical", "Emergency", "Shutdown"];
+
+const num = (x) => (x == null || x === "" || Number.isNaN(Number(x)) ? null : Number(x));
+const grab = (t, re) => t.match(re)?.[1] ?? null;
+const level = (v, [warn, fail]) => (v >= fail ? "fail" : v >= warn ? "warn" : "ok");
+
+function computeChecks() {
+  const checks = [];
+  const add = (group, name, status, value, detail) => checks.push({ group, name, status, value: value ?? "", detail: detail ?? "" });
+  const missing = (group, name, why = "No data returned by the headset.") => add(group, name, "na", "", why);
+
+  /* Power */
+  const bat = state.raw["Battery"] || "";
+  if (!bat.includes("level")) {
+    missing("Power", "Battery health"); missing("Power", "Battery temperature");
+  } else {
+    const present = grab(bat, /present:\s*(\w+)/);
+    const h = num(grab(bat, /health:\s*(\d+)/));
+    if (present === "false") add("Power", "Battery health", "fail", "Not detected", "The system reports no battery present.");
+    else if (h == null || h === 1) missing("Power", "Battery health", "Android reports health as unknown.");
+    else add("Power", "Battery health", h === 2 ? "ok" : h === 7 ? "warn" : "fail", BATTERY_HEALTH[h] || String(h),
+      h === 2 ? "Reported by the battery service." : "Reported by the battery service. Inspect the battery and charging circuit.");
+    const t = num(grab(bat, /temperature:\s*(-?\d+)/));
+    if (t == null) missing("Power", "Battery temperature");
+    else add("Power", "Battery temperature", level(t / 10, LIMITS.batteryTemp), (t / 10).toFixed(1) + " °C", `Warning from ${LIMITS.batteryTemp[0]} °C, failure from ${LIMITS.batteryTemp[1]} °C.`);
+  }
+  const sys = Object.fromEntries((state.raw["Battery sysfs"] || "").split("\n").map((l) => l.split("=")).filter((a) => a.length === 2));
+  const cycles = num(sys.cycle_count);
+  if (cycles == null) missing("Power", "Charge cycles", "Not exposed by this firmware.");
+  else add("Power", "Charge cycles", level(cycles, LIMITS.batteryCycles), String(cycles), `Warning from ${LIMITS.batteryCycles[0]}, failure from ${LIMITS.batteryCycles[1]}.`);
+  const full = num(sys.charge_full), design = num(sys.charge_full_design);
+  if (!full || !design) missing("Power", "Battery capacity", "Design capacity not exposed by this firmware.");
+  else {
+    const pct = Math.round((full / design) * 100);
+    add("Power", "Battery capacity", pct < LIMITS.batteryCapacityMin[1] ? "fail" : pct < LIMITS.batteryCapacityMin[0] ? "warn" : "ok",
+      pct + "% of design", `Warning below ${LIMITS.batteryCapacityMin[0]}%, failure below ${LIMITS.batteryCapacityMin[1]}%.`);
+  }
+
+  /* Thermal */
+  const th = state.raw["Thermal"] || "";
+  const ts = num(grab(th, /Thermal Status:\s*(\d+)/));
+  if (ts == null) missing("Thermal", "Throttling state");
+  else add("Thermal", "Throttling state", ts >= 3 ? "fail" : ts >= 1 ? "warn" : "ok", THERMAL_STATUS[ts] || String(ts), "Android thermal status; anything above None means the system is limiting performance.");
+  const temps = [...th.matchAll(/mValue=(-?[\d.]+), mType=(\d+), mName=([^,}]+)/g)].map((m) => ({ v: Number(m[1]), type: Number(m[2]), name: m[3] }));
+  if (!temps.length) missing("Thermal", "Hottest sensor");
+  else {
+    const worst = temps.map((t) => ({ ...t, lim: LIMITS.thermal[t.type] || LIMITS.thermalDefault })).sort((a, b) => (b.v - b.lim[0]) - (a.v - a.lim[0]))[0];
+    add("Thermal", "Hottest sensor", level(worst.v, worst.lim), `${worst.name} ${worst.v.toFixed(1)} °C`,
+      `${THERMAL_TYPE[worst.type] || "Sensor"} limits: warning ${worst.lim[0]} °C, failure ${worst.lim[1]} °C.`);
+  }
+
+  /* Storage and memory */
+  const storage = (state.raw["Storage"] || "").split("\n")[1]?.trim().split(/\s+/);
+  const used = num(storage?.[4]?.replace("%", ""));
+  if (used == null) missing("Storage", "User storage");
+  else add("Storage", "User storage", level(used, LIMITS.storageUsed), `${used}% used`, `${storage[2]} of ${storage[1]} on /data.`);
+  const mem = state.raw["Memory"] || "";
+  const mt = num(grab(mem, /MemTotal:\s+(\d+)/)), ma = num(grab(mem, /MemAvailable:\s+(\d+)/));
+  if (!mt || ma == null) missing("Storage", "Free memory");
+  else {
+    const free = Math.round((ma / mt) * 100);
+    add("Storage", "Free memory", free < LIMITS.memoryFreeMin ? "warn" : "ok", `${free}% free`, `${(ma / 1048576).toFixed(1)} of ${(mt / 1048576).toFixed(1)} GB available.`);
+  }
+
+  /* Software */
+  const boot = prop("sys.boot_completed");
+  if (!boot) missing("Software", "Boot", "sys.boot_completed not present.");
+  else add("Software", "Boot", boot === "1" ? "ok" : "fail", boot === "1" ? "Completed" : "Not finished", "sys.boot_completed");
+  const vb = prop("ro.boot.verifiedbootstate");
+  if (!vb) missing("Software", "Verified boot", "ro.boot.verifiedbootstate not present.");
+  else add("Software", "Verified boot", vb === "green" ? "ok" : vb === "red" ? "fail" : "warn", vb, vb === "green" ? "Firmware is signed and intact." : "Firmware is modified or the bootloader is unlocked.");
+  const tags = prop("ro.build.tags"), dbg = prop("ro.debuggable");
+  if (!tags && !dbg) missing("Software", "Firmware build");
+  else {
+    const odd = tags.includes("test-keys") || dbg === "1";
+    add("Software", "Firmware build", odd ? "warn" : "ok", tags || "—", odd ? "Development or test build; not the retail firmware." : "Retail release build.");
+  }
+  const restarting = state.props.filter((p) => p.key.startsWith("init.svc.") && p.value === "restarting").map((p) => p.key.slice(9));
+  const svc = state.props.filter((p) => p.key.startsWith("init.svc."));
+  if (!svc.length) missing("Software", "System services");
+  else add("Software", "System services", restarting.length ? "warn" : "ok", restarting.length ? `${restarting.length} restarting` : "Stable",
+    restarting.length ? `Restarting in a loop: ${restarting.join(", ")}. Check logcat for crashes.` : `${svc.filter((p) => p.value === "running").length} running.`);
+
+  /* Sensors */
+  const sens = state.raw["Sensors"] || "";
+  if (!/accel|gyro|proxim|magnet/i.test(sens)) missing("Sensors", "Motion sensors", "No sensor list returned.");
+  else {
+    const has = (re) => re.test(sens);
+    const lost = [["accelerometer", /accel/i], ["gyroscope", /gyro/i]].filter(([, re]) => !has(re)).map(([n]) => n);
+    add("Sensors", "Motion sensors", lost.length ? "fail" : "ok", lost.length ? "Missing" : "Accelerometer, gyroscope", lost.length ? `Not listed: ${lost.join(", ")}.` : "Both are registered with the system. Accuracy needs the on-device test.");
+    add("Sensors", "Proximity sensor", has(/proxim/i) ? "ok" : "warn", has(/proxim/i) ? "Listed" : "Not listed", "The sensor that detects the headset being worn.");
+  }
+  return checks;
 }
 
-const HEALTH = { 1: "Unknown", 2: "Good", 3: "Overheat", 4: "Dead", 5: "Over voltage", 6: "Failure", 7: "Cold" };
-const BATTERY_STATUS = { 1: "Unknown", 2: "Charging", 3: "Discharging", 4: "Not charging", 5: "Full" };
+function verdictOf(checks) {
+  const fails = checks.filter((c) => c.status === "fail").length;
+  const warns = checks.filter((c) => c.status === "warn").length;
+  const ran = checks.filter((c) => c.status !== "na").length;
+  const state_ = fails ? "fail" : warns ? "warn" : ran ? "ok" : "na";
+  const title = { fail: "Not healthy", warn: "Needs attention", ok: "Healthy", na: "Not enough data" }[state_];
+  const parts = [];
+  if (fails) parts.push(`${fails} ${fails === 1 ? "failure" : "failures"}`);
+  if (warns) parts.push(`${warns} ${warns === 1 ? "warning" : "warnings"}`);
+  if (!fails && !warns && ran) parts.push("All checks passed");
+  parts.push(`${ran} of ${checks.length} checks ran`);
+  return { state: state_, title, line: parts.join(" · ") };
+}
 
-function card(title, ...kids) { return el("div", { class: "card" }, el("h3", { text: title }), ...kids); }
-function kv(pairs) {
-  const dl = el("dl", { class: "kv" });
-  for (const [k, v] of pairs) dl.append(el("dt", { text: k }), el("dd", { text: v || "—" }));
-  return dl;
+function summaryText(checks, v) {
+  const out = [
+    "VR Expert diagnostics",
+    `Model: ${prop("ro.product.model") || "—"}   Serial: ${prop("ro.serialno") || state.serial || "—"}`,
+    `Firmware: ${prop("ro.build.display.id") || "—"}   Android ${prop("ro.build.version.release") || "—"}`,
+    `Result: ${v.title} (${v.line})`,
+    state.sample ? "(SAMPLE DATA)" : "",
+    "",
+  ];
+  for (const c of checks.filter((c) => c.status === "fail" || c.status === "warn")) {
+    out.push(`${c.status === "fail" ? "FAIL" : "WARN"}  ${c.name}: ${c.value}. ${c.detail}`);
+  }
+  return out.join("\n").trim();
+}
+
+const GLYPH = { ok: "✓", warn: "!", fail: "✕", na: "–" };
+
+function checkRow(c, compact) {
+  return el("div", { class: "check" + (compact ? " compact" : ""), "data-s": c.status },
+    el("span", { class: "g", text: GLYPH[c.status] }),
+    el("span", { class: "n", text: c.name }),
+    el("span", { class: "val", text: c.value }),
+    c.detail ? el("span", { class: "d", text: c.detail }) : null);
 }
 
 function renderOverview() {
   const o = $("overview");
   if (!state.props.length) {
-    o.replaceChildren(el("div", { class: "empty" }, el("h2", { text: "Nothing to show yet" }), el("p", { text: "Connect a headset or load sample data." })));
+    o.replaceChildren(el("div", { class: "empty" },
+      el("h1", { text: "Check a headset" }),
+      el("p", { text: "Connect a Pico over USB to run the health check. USB debugging must be enabled on the headset." }),
+      el("button", { class: "btn primary", text: "Connect headset", onclick: connect }),
+      el("p", { style: "margin:14px 0 0" }, el("button", { class: "link", text: "Try with sample data", onclick: loadSample }))));
     return;
   }
-  const running = state.props.filter((p) => p.key.startsWith("init.svc.") && p.value === "running").length;
-  const stats = el("div", { class: "stats" },
-    ...[["Properties", state.props.length], ["Read-only", state.props.filter((p) => p.kind === "ro").length],
-      ["Persistent", state.props.filter((p) => p.kind === "persist").length], ["Services running", running]]
-      .map(([l, n]) => el("div", { class: "stat" }, el("b", { text: String(n) }), el("span", { text: l }))));
+  const checks = computeChecks();
+  const v = verdictOf(checks);
+  const attention = checks.filter((c) => c.status === "fail" || c.status === "warn").sort((a, b) => (a.status === "fail" ? 0 : 1) - (b.status === "fail" ? 0 : 1));
+  const passed = checks.filter((c) => c.status === "ok");
+  const unknown = checks.filter((c) => c.status === "na");
 
-  const b = parseBattery(state.raw["Battery"] || "");
-  const pct = b.level && b.scale ? Math.round((b.level / b.scale) * 100) : null;
-  const battery = card("Battery",
-    pct == null ? el("p", { text: "No battery data.", class: "mono" }) : el("div", {},
-      el("div", { class: "big" }, String(pct), el("small", { text: "%" })),
-      el("div", { class: `bar ${pct < 20 ? "low" : pct < 40 ? "mid" : ""}` }, el("i", { style: `width:${pct}%` })),
-      kv([
-        ["Status", BATTERY_STATUS[b.status] || b.status],
-        ["Health", HEALTH[b.health] || b.health],
-        ["Temperature", b.temp ? (b.temp / 10).toFixed(1) + " °C" : null],
-        ["Voltage", b.voltage ? b.voltage + " mV" : null],
-        ["USB / AC power", `${b.usb ?? "—"} / ${b.ac ?? "—"}`],
-      ])));
+  const copyBtn = el("button", { class: "btn", text: "Copy summary", onclick: (e) => copy(summaryText(checks, v), e.target) });
+  const verdict = el("section", { class: "verdict", "data-state": v.state },
+    el("div", { class: "mark", text: { ok: "✓", warn: "!", fail: "✕", na: "?" }[v.state] }),
+    el("div", {}, el("h1", { text: v.title }), el("p", { text: v.line })),
+    copyBtn);
 
-  const identity = card("Identity", kv([
+  const left = el("div", {});
+  if (attention.length) left.append(el("section", {}, el("h2", { text: "Needs attention" }), ...attention.map((c) => checkRow(c))));
+  if (passed.length) left.append(el("section", {}, el("h2", { text: "Passed" }), ...passed.map((c) => checkRow(c, true))));
+  if (unknown.length) left.append(el("section", {}, el("h2", { text: "No data" }), ...unknown.map((c) => checkRow(c))));
+
+  const dl = el("dl", { class: "kv" });
+  const info = [
     ["Model", prop("ro.product.model")], ["Manufacturer", prop("ro.product.manufacturer")],
-    ["Device", prop("ro.product.device")], ["Serial", prop("ro.serialno") || state.serial],
-    ["Android", prop("ro.build.version.release")], ["API level", prop("ro.build.version.sdk")],
-    ["Security patch", prop("ro.build.version.security_patch")], ["Firmware", prop("ro.build.display.id")],
+    ["Serial", prop("ro.serialno") || state.serial], ["Firmware", prop("ro.build.display.id")],
+    ["Android", prop("ro.build.version.release") && `${prop("ro.build.version.release")} (API ${prop("ro.build.version.sdk")})`],
+    ["Security patch", prop("ro.build.version.security_patch")],
     ["Built", interpret("ro.build.date.utc", prop("ro.build.date.utc"))],
-  ]));
+    ["Platform", prop("ro.board.platform") || prop("ro.hardware")], ["Bootloader", prop("ro.bootloader")],
+  ];
+  for (const [k, val] of info) if (val) dl.append(el("dt", { text: k }), el("dd", { text: val }));
 
-  const hw = card("Platform", kv([
-    ["Hardware", prop("ro.hardware")], ["SoC platform", prop("ro.board.platform")],
-    ["CPU ABI", prop("ro.product.cpu.abi")], ["Bootloader", prop("ro.bootloader")],
-    ["Verified boot", prop("ro.boot.verifiedbootstate")], ["Build type", prop("ro.build.type")],
-    ["Debuggable", prop("ro.debuggable")], ["Display density", prop("ro.sf.lcd_density") && prop("ro.sf.lcd_density") + " dpi"],
-  ]));
-
-  const mem = state.raw["Memory"] || "";
-  const kb = (n) => mem.match(new RegExp(n + ":\\s+(\\d+)"))?.[1];
-  const total = kb("MemTotal"), avail = kb("MemAvailable");
-  const storage = (state.raw["Storage"] || "").split("\n")[1]?.trim().split(/\s+/);
-  const resources = card("Resources", kv([
-    ["RAM total", total ? (total / 1048576).toFixed(1) + " GB" : null],
-    ["RAM available", avail ? (avail / 1048576).toFixed(1) + " GB" : null],
-    ["/data size", storage?.[1]], ["/data used", storage ? `${storage[2]} (${storage[4]})` : null],
-  ]));
-
-  o.replaceChildren(stats, el("div", { class: "grid" }, identity, battery, hw, resources));
+  o.replaceChildren(verdict,
+    el("div", { class: "cols" }, left, el("aside", {}, el("h2", { text: "Device", style: "font-size:15px;margin-bottom:10px" }), dl)),
+    el("p", { class: "scope", text: "These are software-level checks read over ADB. Cameras, tracking, controllers, display and audio need the on-device test app, which is not built yet." }));
 }
 
 function renderRaw() {
   const r = $("raw");
   const names = Object.keys(state.raw);
-  $("c-raw").textContent = names.length || "";
-  if (!names.length) { r.replaceChildren(el("div", { class: "empty" }, el("h2", { text: "No output yet" }), el("p", { text: "Command output appears here after connecting." }))); return; }
+  if (!names.length) { r.replaceChildren(el("div", { class: "msg", text: "Command output appears here after connecting." })); return; }
   r.replaceChildren(...names.map((n) => el("details", {}, el("summary", { text: `${n}` }), el("pre", { text: state.raw[n] || "(no output)" }))));
 }
 
 function renderAll() {
   renderDevice(); renderCats(); renderRows(); renderDrawer(); renderOverview(); renderRaw();
   $("exp-json").disabled = $("exp-csv").disabled = !state.props.length;
-  $("banner").hidden = !state.sample;
 }
 
 /* ---------- ADB ---------- */
@@ -492,10 +594,10 @@ async function connect() {
   const manager = AdbDaemonWebUsbDeviceManager.BROWSER;
   if (!manager) return setStatus("This browser does not support WebUSB. Use Chrome or Edge.", "err");
   try {
-    setStatus("Pick the headset in the browser prompt…");
+    setStatus("", "busy");
     const device = await manager.requestDevice();
-    if (!device) return setStatus("No device selected.", "err");
-    setStatus("Opening USB… If the headset asks, tap “Allow USB debugging”.");
+    if (!device) return setStatus("");
+    setStatus("", "busy");
     let connection;
     try {
       connection = await device.connect();
@@ -518,16 +620,16 @@ async function connect() {
 
 async function readAll() {
   if (!state.adb) return;
-  setStatus("Reading getprop…");
+  setStatus("", "busy");
   state.props = parseGetprop(await sh("getprop"));
   state.raw = {};
   renderAll();
   for (const [label, cmd] of RAW_COMMANDS) {
-    setStatus(`Running ${cmd}…`);
+    setStatus("", "busy");
     try { state.raw[label] = await sh(cmd); } catch (e) { state.raw[label] = "Error: " + e; }
   }
   renderAll();
-  setStatus(`Done. ${state.props.length} properties read from ${prop("ro.product.model") || state.serial}.`, "ok");
+  setStatus("");
 }
 
 function loadSample() {
@@ -538,7 +640,7 @@ function loadSample() {
   state.raw = { ...SAMPLE_RAW };
   $("refresh").disabled = true;
   renderAll();
-  setStatus("Showing sample data. Connect a headset to read real values.", "");
+  setStatus("");
 }
 
 /* ---------- export ---------- */
@@ -553,7 +655,6 @@ const stamp = () => `${prop("ro.serialno") || state.serial || "headset"}-${new D
 /* ---------- wiring ---------- */
 
 $("connect").onclick = connect;
-$("sample").onclick = loadSample;
 $("refresh").onclick = () => readAll().catch((e) => setStatus("Error: " + e, "err"));
 $("q").addEventListener("input", (e) => { state.q = e.target.value; renderRows(); });
 $("kinds").addEventListener("click", (e) => {
@@ -576,5 +677,5 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "/" && document.activeElement !== $("q")) { e.preventDefault(); $("q").focus(); }
   if (e.key === "Escape") { if (document.activeElement === $("q") && state.q) { $("q").value = ""; state.q = ""; renderRows(); } else select(null); }
 });
-if (!navigator.usb) setStatus("This browser does not support WebUSB. Use Chrome or Edge to connect a headset. Sample data still works.", "err");
+if (!navigator.usb) setStatus("This browser does not support WebUSB. Use Chrome or Edge to connect a headset. ", "err");
 renderAll();

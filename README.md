@@ -1,11 +1,11 @@
 # testbench
 
-## Pico Bench: headset diagnostics over WebUSB (proof of concept)
+## VR Expert Diagnostics: headset health check over WebUSB (proof of concept)
 
 A static web page (`docs/`) that connects to a Pico headset over ADB using WebUSB and lets you explore every system property (`getprop`) in detail, plus battery, storage, memory, thermal and sensor output. Read-only: it never changes anything on the headset.
 
+- **Overview** (default tab): health verdict (Healthy, Needs attention, Not healthy) from battery, thermal, storage, software and sensor checks, with thresholds in `LIMITS` in `src/main.js`.
 - **Properties**: searchable list of all `getprop` entries, grouped by category (Pico / XR, Build, Product, Security, Display, Hardware, Network, Services...), with a detail panel (meaning, type, interpreted value, related properties) and JSON / CSV export.
-- **Overview**: identity, platform, battery and resources at a glance.
 - **Raw output**: the unprocessed output of every command that was run.
 - **Load sample data** shows the interface with fictional data, no headset needed.
 
