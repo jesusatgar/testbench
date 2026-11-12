@@ -499,13 +499,16 @@ function computeChecks() {
 
   /* Sensors */
   const sens = state.raw["Sensors"] || "";
-  if (!/accel|gyro|proxim|magnet/i.test(sens)) missing("Sensors", "Motion sensors", "No sensor list returned.");
+  if (!/accel|gyro|proxim|magnet/i.test(sens)) missing("Sensors", "Motion sensors", "The system does not list motion sensors to adb. Pico OS may keep the IMU private.");
   else {
     const has = (re) => re.test(sens);
-    const lost = [["accelerometer", /accel/i], ["gyroscope", /gyro/i]].filter(([, re]) => !has(re)).map(([n]) => n);
-    add("Sensors", "Motion sensors", lost.length ? "fail" : "ok", lost.length ? "Missing" : "Accelerometer, gyroscope", lost.length ? `Not listed: ${lost.join(", ")}.` : "Both are registered with the system. Accuracy needs the on-device test.");
-    add("Sensors", "Proximity sensor", has(/proxim/i) ? "ok" : "warn", has(/proxim/i) ? "Listed" : "Not listed", "The sensor that detects the headset being worn.");
+    const listed = [["accelerometer", /accel/i], ["gyroscope", /gyro/i]].filter(([, re]) => has(re)).map(([n]) => n);
+    if (listed.length === 2) add("Sensors", "Motion sensors", "ok", "Accelerometer, gyroscope", "Both are registered with the system. Accuracy is checked by the device tests.");
+    else missing("Sensors", "Motion sensors", "Not listed by this firmware: " + ["accelerometer", "gyroscope"].filter((n) => !listed.includes(n)).join(", ") + ". Not treated as a fault.");
+    if (has(/proxim/i)) add("Sensors", "Proximity sensor", "ok", "Listed", "The sensor that detects the headset being worn.");
+    else missing("Sensors", "Proximity sensor", "Not listed by this firmware. Not treated as a fault.");
   }
+
   /* Device tests (results from the on-device app) */
   for (const t of state.bench?.tests || []) add("Device tests", t.name, t.status, t.value, t.detail);
   return checks;

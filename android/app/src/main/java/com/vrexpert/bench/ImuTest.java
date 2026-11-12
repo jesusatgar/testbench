@@ -8,6 +8,9 @@ import android.hardware.SensorManager;
 import android.os.Handler;
 import android.os.HandlerThread;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -25,38 +28,33 @@ final class ImuTest {
     static Result run(Context c, int seconds) throws InterruptedException {
         Result r = new Result("imu", "Motion sensors (IMU)");
         SensorManager sm = (SensorManager) c.getSystemService(Context.SENSOR_SERVICE);
-        Sensor acc = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-        Sensor gyr = sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
-        if (acc == null || gyr == null) {
-            String lost = acc == null && gyr == null ? "accelerometer and gyroscope"
-                    : acc == null ? "accelerometer" : "gyroscope";
-            return r.set("fail", "Missing", "The system does not list: " + lost + ".");
+        List<Sensor> all = sm.getSensorList(Sensor.TYPE_ALL);
+        JSONArray names = new JSONArray();
+        for (Sensor s : all) names.put(s.getName() + " [" + s.getStringType() + "]");
+        try {
+            r.metrics.put("sensors", names);
+        } catch (JSONException ignored) {
+        }
+
+        Sensor acc = pick(sm, all, Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_ACCELEROMETER_UNCALIBRATED, "accel");
+        Sensor gyr = pick(sm, all, Sensor.TYPE_GYROSCOPE, Sensor.TYPE_GYROSCOPE_UNCALIBRATED, "gyro");
+        if (acc == null && gyr == null) {
+            // Pico OS can keep the IMU private to its tracking service, so this is not a fault.
+            return r.set("na", "Not exposed", "Android lists " + all.size()
+                    + " sensors but no accelerometer or gyroscope for regular apps. This firmware may keep the IMU private, so it is not a fault. The sensor list was saved in the results.");
         }
 
         final List<float[]> a = new ArrayList<>();
         final List<float[]> g = new ArrayList<>();
-        SensorEventListener l = new SensorEventListener() {
-            @Override
-            public void onSensorChanged(SensorEvent e) {
-                float[] v = new float[]{e.values[0], e.values[1], e.values[2]};
-                if (e.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
-                    synchronized (a) { a.add(v); }
-                } else {
-                    synchronized (g) { g.add(v); }
-                }
-            }
-
-            @Override
-            public void onAccuracyChanged(Sensor s, int accuracy) {
-            }
-        };
         HandlerThread ht = new HandlerThread("vre-imu");
         ht.start();
         Handler h = new Handler(ht.getLooper());
-        sm.registerListener(l, acc, SensorManager.SENSOR_DELAY_FASTEST, h);
-        sm.registerListener(l, gyr, SensorManager.SENSOR_DELAY_FASTEST, h);
+        SensorEventListener la = listener(a), lg = listener(g);
+        if (acc != null) sm.registerListener(la, acc, SensorManager.SENSOR_DELAY_FASTEST, h);
+        if (gyr != null) sm.registerListener(lg, gyr, SensorManager.SENSOR_DELAY_FASTEST, h);
         Thread.sleep(seconds * 1000L);
-        sm.unregisterListener(l);
+        sm.unregisterListener(la);
+        sm.unregisterListener(lg);
         ht.quitSafely();
 
         double[] sa, sg;
@@ -65,33 +63,64 @@ final class ImuTest {
         int na = a.size(), ng = g.size();
         double accRate = na / (double) seconds, gyrRate = ng / (double) seconds;
         double accMag = sa[3], accNoise = sa[4], gyrBias = sg[3], gyrNoise = sg[4];
-
         r.metric("accel_rate_hz", accRate).metric("gyro_rate_hz", gyrRate)
                 .metric("accel_magnitude", accMag).metric("accel_noise", accNoise)
                 .metric("gyro_bias_rad_s", gyrBias).metric("gyro_noise_rad_s", gyrNoise);
 
-        if (na == 0 || ng == 0) {
-            return r.set("fail", "No data", "A sensor is listed but produced no samples.");
+        String missing = (acc == null ? "accelerometer " : "") + (gyr == null ? "gyroscope" : "");
+        String note = missing.isEmpty() ? "" : " Not exposed to apps: " + missing.trim() + ".";
+
+        // A sensor that is listed but silent is a real symptom.
+        if ((acc != null && na == 0) || (gyr != null && ng == 0)) {
+            return r.set("fail", "No data", "A sensor is listed but produced no samples." + note);
         }
-        if (gyrNoise > MOVING_GYRO_STD || accNoise > MOVING_ACC_STD) {
+        if ((gyr != null && gyrNoise > MOVING_GYRO_STD) || (acc != null && accNoise > MOVING_ACC_STD)) {
             return r.set("na", "Moved", "The headset was moving during the test. Repeat on a still surface.");
         }
-        String value = String.format(Locale.US, "gravity %.2f m/s², gyro bias %.3f rad/s", accMag, gyrBias);
-        if (gyrBias > GYRO_BIAS_FAIL) {
-            return r.set("fail", value, "Gyroscope bias is very high at rest. The IMU is likely faulty.");
+        String value = (acc != null ? String.format(Locale.US, "gravity %.2f m/s²", accMag) : "")
+                + (acc != null && gyr != null ? ", " : "")
+                + (gyr != null ? String.format(Locale.US, "gyro bias %.3f rad/s", gyrBias) : "");
+        if (gyr != null && gyrBias > GYRO_BIAS_FAIL) {
+            return r.set("fail", value, "Gyroscope bias is very high at rest. The IMU is likely faulty." + note);
         }
-        if (gyrBias > GYRO_BIAS_WARN) {
-            return r.set("warn", value, "Gyroscope bias is high at rest. Expect view drift.");
+        if (gyr != null && gyrBias > GYRO_BIAS_WARN) {
+            return r.set("warn", value, "Gyroscope bias is high at rest. Expect view drift." + note);
         }
-        if (Math.abs(accMag - 9.81) > GRAVITY_TOLERANCE) {
-            return r.set("warn", value, "Accelerometer does not read 9.81 m/s² at rest. Calibration may be off.");
+        if (acc != null && Math.abs(accMag - 9.81) > GRAVITY_TOLERANCE) {
+            return r.set("warn", value, "Accelerometer does not read 9.81 m/s² at rest. Calibration may be off." + note);
         }
-        if (accRate < MIN_RATE_HZ || gyrRate < MIN_RATE_HZ) {
+        if ((acc != null && accRate < MIN_RATE_HZ) || (gyr != null && gyrRate < MIN_RATE_HZ)) {
             return r.set("warn", value, String.format(Locale.US,
-                    "Low sampling rate (accel %.0f Hz, gyro %.0f Hz).", accRate, gyrRate));
+                    "Low sampling rate (accel %.0f Hz, gyro %.0f Hz).", accRate, gyrRate) + note);
         }
         return r.set("ok", value, String.format(Locale.US,
-                "Sampling at %.0f Hz (accel) and %.0f Hz (gyro), low noise at rest.", accRate, gyrRate));
+                "Sampling at %.0f Hz (accel) and %.0f Hz (gyro), low noise at rest.", accRate, gyrRate) + note);
+    }
+
+    private static SensorEventListener listener(final List<float[]> into) {
+        return new SensorEventListener() {
+            @Override
+            public void onSensorChanged(SensorEvent e) {
+                float[] v = new float[]{e.values[0], e.values[1], e.values[2]};
+                synchronized (into) { into.add(v); }
+            }
+
+            @Override
+            public void onAccuracyChanged(Sensor s, int accuracy) {
+            }
+        };
+    }
+
+    /** Finds a sensor by standard type, then uncalibrated type, then by name or vendor type string. */
+    private static Sensor pick(SensorManager sm, List<Sensor> all, int type, int uncalibrated, String key) {
+        Sensor s = sm.getDefaultSensor(type);
+        if (s == null) s = sm.getDefaultSensor(uncalibrated);
+        if (s != null) return s;
+        for (Sensor x : all) {
+            String n = (x.getName() + " " + x.getStringType()).toLowerCase(Locale.US);
+            if (n.contains(key)) return x;
+        }
+        return null;
     }
 
     /** Returns {meanX, meanY, meanZ, |mean|, noise} where noise is the combined standard deviation. */
