@@ -14,7 +14,7 @@ const RAW_COMMANDS = [
   ["Memory", "cat /proc/meminfo"],
   ["Sensors", "dumpsys sensorservice"],
   ["Pico packages", "pm list packages | grep -i pico"],
-  ["Pico factory test", "dumpsys package com.picovr.factorytest | grep -iE 'Activity |Action:|cmp=|Category:' | head -60"],
+  ["Pico factory test", "dumpsys package com.picovr.factorytest | head -300"],
 ];
 
 const state = {
