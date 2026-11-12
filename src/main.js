@@ -411,6 +411,10 @@ const LIMITS = {
   memoryFreeMin: 10,          // % MemAvailable (warn only)
   thermal: { 0: [75, 90], 1: [75, 90], 2: [45, 55], 3: [42, 48], 4: [75, 90] }, // by Android temperature type
   thermalDefault: [75, 90],
+  gyroBias: [0.05, 0.15],     // rad/s at rest
+  gyroMoving: 0.03,           // rad/s noise above which the headset counts as moving
+  accMoving: 0.2,             // m/s² noise above which the headset counts as moving
+  gravityTolerance: 0.8,      // m/s² around 9.81
 };
 const THERMAL_TYPE = { 0: "CPU", 1: "GPU", 2: "Battery", 3: "Skin", 4: "USB port" };
 const BATTERY_HEALTH = { 1: "Unknown", 2: "Good", 3: "Overheat", 4: "Dead", 5: "Over voltage", 6: "Failure", 7: "Cold" };
@@ -419,6 +423,32 @@ const THERMAL_STATUS = ["None", "Light", "Moderate", "Severe", "Critical", "Emer
 const num = (x) => (x == null || x === "" || Number.isNaN(Number(x)) ? null : Number(x));
 const grab = (t, re) => t.match(re)?.[1] ?? null;
 const level = (v, [warn, fail]) => (v >= fail ? "fail" : v >= warn ? "warn" : "ok");
+
+/** Parses `dumpsys sensorservice`: the sensor list and the recent events it keeps per sensor. */
+function parseSensorDump(t) {
+  const clock = (h, m, sec, frac) => h * 3600 + m * 60 + sec + Number("0." + frac);
+  const cap = t.match(/Captured at:\s*(\d+):(\d+):(\d+)\.(\d+)/);
+  const sensors = [...t.matchAll(/^0x[0-9a-f]+\) (.+?)\s+\| (.+?)\s+\| ver: [^|]*\| type: android\.sensor\.([a-z_]+)\(\d+\)/gim)]
+    .map((m) => ({ name: m[1].trim(), vendor: m[2].trim(), kind: m[3] }));
+  const events = {};
+  let cur = null;
+  for (const line of t.split("\n")) {
+    const h = line.match(/^(.+?): last (\d+) events?\s*$/);
+    if (h) { cur = events[h[1]] = []; continue; }
+    const e = line.match(/^\s+\d+ \(ts=[\d.]+, wall=(\d+):(\d+):(\d+)\.(\d+)\)\s+(.+?),?\s*$/);
+    if (e && cur) { cur.push({ at: clock(+e[1], +e[2], +e[3], e[4]), v: e[5].split(",").map(Number) }); continue; }
+    if (!/^\s/.test(line)) cur = null;
+  }
+  return { captured: cap ? clock(+cap[1], +cap[2], +cap[3], cap[4]) : null, sensors, events };
+}
+
+/** Mean vector magnitude and combined standard deviation of 3-axis samples. */
+function vecStats(vs) {
+  const n = vs.length;
+  const mean = [0, 1, 2].map((i) => vs.reduce((a, v) => a + (v[i] || 0), 0) / n);
+  const noise = Math.sqrt([0, 1, 2].reduce((a, i) => a + vs.reduce((b, v) => b + ((v[i] || 0) - mean[i]) ** 2, 0) / n, 0));
+  return { mag: Math.hypot(...mean), noise };
+}
 
 function computeChecks() {
   const checks = [];
@@ -497,16 +527,46 @@ function computeChecks() {
   else add("Software", "System services", restarting.length ? "warn" : "ok", restarting.length ? `${restarting.length} restarting` : "Stable",
     restarting.length ? `Restarting in a loop: ${restarting.join(", ")}. Check logcat for crashes.` : `${svc.filter((p) => p.value === "running").length} running.`);
 
-  /* Sensors */
-  const sens = state.raw["Sensors"] || "";
-  if (!/accel|gyro|proxim|magnet/i.test(sens)) missing("Sensors", "Motion sensors", "The system does not list motion sensors to adb. Pico OS may keep the IMU private.");
-  else {
-    const has = (re) => re.test(sens);
-    const listed = [["accelerometer", /accel/i], ["gyroscope", /gyro/i]].filter(([, re]) => has(re)).map(([n]) => n);
-    if (listed.length === 2) add("Sensors", "Motion sensors", "ok", "Accelerometer, gyroscope", "Both are registered with the system. Accuracy is checked by the device tests.");
-    else missing("Sensors", "Motion sensors", "Not listed by this firmware: " + ["accelerometer", "gyroscope"].filter((n) => !listed.includes(n)).join(", ") + ". Not treated as a fault.");
-    if (has(/proxim/i)) add("Sensors", "Proximity sensor", "ok", "Listed", "The sensor that detects the headset being worn.");
-    else missing("Sensors", "Proximity sensor", "Not listed by this firmware. Not treated as a fault.");
+  /* Sensors (read from `dumpsys sensorservice`, no app needed) */
+  const dump = parseSensorDump(state.raw["Sensors"] || "");
+  if (!dump.sensors.length) {
+    missing("Sensors", "Motion sensors", "The system did not return a sensor list.");
+  } else {
+    const hw = (kind) => dump.sensors.find((x) => x.kind === kind && x.vendor !== "AOSP");
+    const label = (x) => `${x.name.split(" ")[0]} (${x.vendor})`;
+    const acc = hw("accelerometer"), gyr = hw("gyroscope"), mag = hw("magnetic_field"), prox = hw("proximity");
+    if (acc && gyr) {
+      add("Sensors", "Motion sensors", "ok", "Accelerometer, gyroscope",
+        `Registered: ${label(acc)}${gyr.name.split(" ")[0] !== acc.name.split(" ")[0] ? ", " + label(gyr) : ""}${mag ? `, magnetometer ${label(mag)}` : ""}.`);
+    } else {
+      missing("Sensors", "Motion sensors", "Not listed by this firmware: " + [!acc && "accelerometer", !gyr && "gyroscope"].filter(Boolean).join(", ") + ".");
+    }
+    const recent = (re, not) => {
+      const keys = Object.keys(dump.events).filter((k) => re.test(k) && !not.test(k) && dump.events[k].length >= 3);
+      const k = keys.find((x) => /non-wakeup/i.test(x)) || keys[0];
+      return k ? dump.events[k] : null;
+    };
+    const age = (ev) => (dump.captured == null ? 0 : (dump.captured - ev[ev.length - 1].at + 86400) % 86400);
+    const gev = recent(/gyroscope/i, /uncal|corrected|bias/i);
+    if (!gev) missing("Sensors", "Gyroscope at rest", "No recent gyroscope readings. The sensor is idle.");
+    else if (age(gev) > 120) missing("Sensors", "Gyroscope at rest", `Last reading is ${Math.round(age(gev) / 60)} min old.`);
+    else {
+      const st = vecStats(gev.map((e) => e.v));
+      if (st.noise > LIMITS.gyroMoving) missing("Sensors", "Gyroscope at rest", "The headset was moving. Leave it on a still surface and read again.");
+      else add("Sensors", "Gyroscope at rest", level(st.mag, LIMITS.gyroBias), `bias ${st.mag.toFixed(3)} rad/s`,
+        `Mean of ${gev.length} live readings. Warning from ${LIMITS.gyroBias[0]} rad/s, failure from ${LIMITS.gyroBias[1]} rad/s.`);
+    }
+    const aev = recent(/accelerometer/i, /uncal/i);
+    if (!aev) missing("Sensors", "Accelerometer at rest", "No recent accelerometer readings. The sensor is idle.");
+    else if (age(aev) > 300) missing("Sensors", "Accelerometer at rest", `Last reading is ${Math.round(age(aev) / 60)} min old. Run the device tests for a fresh reading.`);
+    else {
+      const st = vecStats(aev.map((e) => e.v));
+      if (st.noise > LIMITS.accMoving) missing("Sensors", "Accelerometer at rest", "The headset was moving. Leave it on a still surface and read again.");
+      else add("Sensors", "Accelerometer at rest", Math.abs(st.mag - 9.81) > LIMITS.gravityTolerance ? "warn" : "ok", `${st.mag.toFixed(2)} m/s²`,
+        `Should read about 9.81 m/s² at rest (±${LIMITS.gravityTolerance}).`);
+    }
+    if (prox) add("Sensors", "Proximity sensor", "ok", "Listed", `${label(prox)}. Detects the headset being worn.`);
+    else missing("Sensors", "Proximity sensor", "Not listed by this firmware.");
   }
 
   /* Device tests (results from the on-device app) */

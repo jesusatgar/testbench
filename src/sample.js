@@ -6,7 +6,7 @@ export const SAMPLE_RAW = {
   "Battery sysfs": "cycle_count=312\ncharge_full=5100000\ncharge_full_design=5300000\ncapacity=64",
   "Storage": "Filesystem Size Used Avail Use% Mounted on\n/dev/block/dm-9 98G 21G 77G 22% /data\n",
   "Memory": "MemTotal:        7864320 kB\nMemFree:          812344 kB\nMemAvailable:    3921000 kB\n",
-  "Sensors": "(sample) Sensor List:\n0x00000001) IMU accelerometer\n0x00000002) IMU gyroscope\n0x00000003) Proximity\n",
+  "Sensors": "Captured at: 10:00:10.000\nSensor List:\n0x0000000b) sample-imu Accelerometer Non-wakeup | SampleVendor  | ver: 1 | type: android.sensor.accelerometer(1) | perm: n/a | flags: 0x00000980\n0x00000029) sample-imu Gyroscope Non-wakeup | SampleVendor  | ver: 1 | type: android.sensor.gyroscope(4) | perm: n/a | flags: 0x00000980\n0x00000015) sample-mag Magnetometer Non-wakeup | SampleVendor  | ver: 1 | type: android.sensor.magnetic_field(2) | perm: n/a | flags: 0x00000880\n0x00000051) sample-prox Proximity Sensor Non-wakeup | SampleVendor  | ver: 1 | type: android.sensor.proximity(8) | perm: n/a | flags: 0x00000002\nRecent Sensor events:\nsample-imu Accelerometer Non-wakeup: last 4 events\n\t 1 (ts=1.0, wall=10:00:08.100) 0.12, 0.30, 9.78, \n\t 2 (ts=1.1, wall=10:00:08.200) 0.11, 0.29, 9.80, \n\t 3 (ts=1.2, wall=10:00:08.300) 0.12, 0.31, 9.79, \n\t 4 (ts=1.3, wall=10:00:08.400) 0.12, 0.30, 9.78, \nsample-imu Gyroscope Non-wakeup: last 4 events\n\t 1 (ts=1.0, wall=10:00:09.100) 0.00, 0.01, 0.00, \n\t 2 (ts=1.2, wall=10:00:09.300) 0.00, 0.01, 0.01, \n\t 3 (ts=1.4, wall=10:00:09.500) 0.01, 0.00, 0.00, \n\t 4 (ts=1.6, wall=10:00:09.700) 0.00, 0.01, 0.00, \n",
   "Pico packages": "package:com.sample.pico.tracking\npackage:com.sample.pico.launcher\n"
 };
 
