@@ -179,6 +179,7 @@ details pre{margin:0;padding:12px 14px;border-top:1px solid var(--line);font:12p
 <header>
   <div class="brand">VR Expert<span>Diagnostics</span></div>
   <div class="who" id="who"></div>
+  <button class="btn" id="open" type="button">Open report</button>
   <button class="btn" id="refresh" disabled>Re-read</button>
   <button class="btn primary" id="connect">Connect headset</button>
   <button class="btn icon" id="theme" type="button"></button>
@@ -213,6 +214,7 @@ details pre{margin:0;padding:12px 14px;border-top:1px solid var(--line);font:12p
   <section class="view" id="v-raw"><div class="page"><div class="wrap" id="raw"></div></div></section>
 </main>
 <input type="file" id="apk" accept=".apk" hidden>
-<script src="main.js?v=8"></script>
+<input type="file" id="report" accept=".json,application/json" hidden>
+<script src="main.js?v=10"></script>
 </body>
 </html>

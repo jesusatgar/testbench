@@ -14,6 +14,7 @@ const RAW_COMMANDS = [
   ["Memory", "cat /proc/meminfo"],
   ["Sensors", "dumpsys sensorservice"],
   ["Pico packages", "pm list packages | grep -i pico"],
+  ["Pico factory test", "dumpsys package com.picovr.factorytest | grep -iE 'Activity |Action:|cmp=|Category:' | head -60"],
 ];
 
 const state = {
@@ -26,6 +27,7 @@ const state = {
   kind: "all",
   q: "",
   selected: null,
+  loaded: null,      // {date} when the data comes from a saved report
   bench: null,       // parsed result.json from the on-device test app
   benchRun: null,    // {text} while the tests are running
   stressSec: 120,
@@ -35,8 +37,8 @@ const state = {
 
 // Which headset family this is. `tested` marks profiles validated on real hardware.
 const PROFILES = [
-  { id: "g3", re: /\bg3\b|pico[ _-]?g3/i, label: "Pico G3", tested: false,
-    note: "The G3 is a 3DoF headset, so it has no tracking cameras to test." },
+  // designMah is the nominal battery capacity used to judge wear. Confirm it against Pico's spec sheet.
+  { id: "g3", re: /\bg3\b|pico[ _-]?g3/i, label: "Pico G3", tested: true, designMah: 5300, note: "" },
   { id: "neo3", re: /neo[ _-]?3/i, label: "Pico Neo 3", tested: false, note: "" },
   { id: "p4u", re: /ultra/i, label: "Pico 4 Ultra Enterprise", tested: false, note: "" },
   { id: "p4e", re: /pico[ _-]?4|\bp4\b/i, label: "Pico 4 Enterprise", tested: false, note: "" },
@@ -398,6 +400,7 @@ function renderDevice() {
   const bits = [prop("ro.product.model"), prop("ro.serialno") || state.serial, prop("ro.build.display.id")].filter(Boolean);
   bits.forEach((b, i) => { if (i) w.append(" · "); w.append(i === 0 ? el("b", { text: b }) : b); });
   if (state.sample) w.append(el("span", { class: "tag", style: "margin-left:8px;background:var(--warn-bg);color:var(--warn)", text: "Sample data" }));
+  else if (state.loaded) w.append(el("span", { class: "tag", style: "margin-left:8px", text: "Saved report" + (state.loaded.date ? " · " + state.loaded.date.slice(0, 10) : "") }));
 }
 
 /* ---------- health checks ---------- */
@@ -475,7 +478,19 @@ function computeChecks() {
   if (cycles == null) missing("Power", "Charge cycles", "Not exposed by this firmware.");
   else add("Power", "Charge cycles", level(cycles, LIMITS.batteryCycles), String(cycles), `Warning from ${LIMITS.batteryCycles[0]}, failure from ${LIMITS.batteryCycles[1]}.`);
   const full = num(sys.charge_full), design = num(sys.charge_full_design);
-  if (!full || !design) missing("Power", "Battery capacity", "Design capacity not exposed by this firmware.");
+  const counter = num(grab(bat, /Charge counter:\s*(\d+)/)), lvl = num(grab(bat, /level:\s*(\d+)/));
+  const designMah = profile()?.designMah;
+  if ((!full || !design) && counter && lvl >= 60) {
+    // Fallback when sysfs is closed: remaining charge divided by the level gives the full-charge capacity.
+    const estMah = counter / 1000 / (lvl / 100);
+    if (designMah) {
+      const pct = Math.round((estMah / designMah) * 100);
+      add("Power", "Battery capacity", pct < LIMITS.batteryCapacityMin[1] ? "fail" : pct < LIMITS.batteryCapacityMin[0] ? "warn" : "ok",
+        `${pct}% of design`, `About ${Math.round(estMah)} mAh when full, from the charge counter, against ${designMah} mAh nominal. Most accurate at 100% charge.`);
+    } else {
+      missing("Power", "Battery capacity", `About ${Math.round(estMah)} mAh when full. Design capacity unknown for this model.`);
+    }
+  } else if (!full || !design) missing("Power", "Battery capacity", "Design capacity not exposed by this firmware.");
   else {
     const pct = Math.round((full / design) * 100);
     add("Power", "Battery capacity", pct < LIMITS.batteryCapacityMin[1] ? "fail" : pct < LIMITS.batteryCapacityMin[0] ? "warn" : "ok",
@@ -519,7 +534,7 @@ function computeChecks() {
   if (!tags && !dbg) missing("Software", "Firmware build");
   else {
     const odd = tags.includes("test-keys") || dbg === "1";
-    add("Software", "Firmware build", odd ? "warn" : "ok", tags || "—", odd ? "Development or test build; not the retail firmware." : "Retail release build.");
+    add("Software", "Firmware build", odd ? "warn" : "ok", tags || "—", odd ? "Development or test build; not the retail firmware." : `Build type ${prop("ro.build.type") || "unknown"}, no debug flags.`);
   }
   const restarting = state.props.filter((p) => p.key.startsWith("init.svc.") && p.value === "restarting").map((p) => p.key.slice(9));
   const svc = state.props.filter((p) => p.key.startsWith("init.svc."));
@@ -629,7 +644,7 @@ function benchPanel() {
   const btn = el("button", { class: "btn primary", text: state.bench ? "Run again" : "Run device tests", onclick: runBench });
   if (!canRun) btn.setAttribute("disabled", "");
   const status = run ? run.text
-    : !state.adb ? (state.sample ? "Connect a headset to run these." : "")
+    : !state.adb ? "Connect a headset to run these."
     : state.bench ? "Last run is included in the results below." : "";
   return el("section", { class: "bench" },
     el("div", {},
@@ -720,7 +735,9 @@ function renderOverview() {
       el("h1", { text: "Check a headset" }),
       el("p", { text: "Connect a Pico over USB to run the health check. USB debugging must be enabled on the headset." }),
       el("button", { class: "btn primary", text: "Connect headset", onclick: connect }),
-      el("p", { style: "margin:14px 0 0" }, el("button", { class: "link", text: "Try with sample data", onclick: loadSample }))));
+      el("p", { style: "margin:14px 0 0" },
+        el("button", { class: "link", text: "Open a saved report", onclick: () => $("report").click() }), "  ·  ",
+        el("button", { class: "link", text: "Try with sample data", onclick: loadSample }))));
     return;
   }
   const checks = computeChecks();
@@ -748,6 +765,8 @@ function renderOverview() {
     ["Security patch", prop("ro.build.version.security_patch")],
     ["Built", interpret("ro.build.date.utc", prop("ro.build.date.utc"))],
     ["Platform", prop("ro.board.platform") || prop("ro.hardware")], ["Bootloader", prop("ro.bootloader")],
+    ["Display", prop("ro.pvr.hmd.lcd.type") || prop("persist.pvr.display.type")],
+    ["Refresh rate", prop("sys.pvr.display.type") && `${Number(prop("sys.pvr.display.type")).toFixed(0)} Hz`],
   ];
   for (const [k, val] of info) if (val) dl.append(el("dt", { text: k }), el("dd", { text: val }));
 
@@ -799,6 +818,7 @@ async function connect() {
     state.adb = new Adb(transport);
     state.serial = device.serial;
     state.sample = false;
+    state.loaded = null;
     $("refresh").disabled = false;
     await readAll();
   } catch (e) {
@@ -824,10 +844,28 @@ async function readAll() {
 function loadSample() {
   state.adb = null;
   state.sample = true;
+  state.loaded = null;
   state.serial = "SAMPLE0000";
   state.props = parseGetprop(SAMPLE_PROPS);
   state.raw = { ...SAMPLE_RAW };
   state.bench = SAMPLE_BENCH;
+  $("refresh").disabled = true;
+  renderAll();
+  setStatus("");
+}
+
+/* ---------- saved reports ---------- */
+
+function loadReport(doc) {
+  if (!doc || typeof doc.properties !== "object") throw new Error("This file is not a report exported from this page.");
+  state.adb = null;
+  state.sample = !!doc.sample;
+  state.loaded = { date: doc.date || "" };
+  state.props = Object.entries(doc.properties).map(([k, v]) => makeProp(k, String(v))).sort((a, b) => a.key.localeCompare(b.key));
+  state.raw = doc.raw || {};
+  state.bench = doc.deviceTests || null;
+  state.serial = doc.properties["ro.serialno"] || "";
+  state.selected = null;
   $("refresh").disabled = true;
   renderAll();
   setStatus("");
@@ -845,6 +883,13 @@ const stamp = () => `${prop("ro.serialno") || state.serial || "headset"}-${new D
 /* ---------- wiring ---------- */
 
 $("connect").onclick = connect;
+$("open").onclick = () => $("report").click();
+$("report").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  try { loadReport(JSON.parse(await f.text())); } catch (err) { setStatus("Could not open the report: " + err.message, "err"); }
+});
 $("refresh").onclick = () => readAll().catch((e) => setStatus("Error: " + e, "err"));
 $("q").addEventListener("input", (e) => { state.q = e.target.value; renderRows(); });
 $("kinds").addEventListener("click", (e) => {
