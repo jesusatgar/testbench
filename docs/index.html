@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>VR Expert Diagnostics</title>
 <meta name="theme-color" content="#ff6a00">
+<script>try{var t=localStorage.getItem("vre-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -60,6 +61,8 @@ header{display:flex;align-items:center;gap:16px;padding:12px 20px;background:var
 .btn:hover:not(:disabled){border-color:var(--brand)}
 .btn:disabled{opacity:.45;cursor:default}
 .btn.primary{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+.btn.icon{padding:7px 9px;display:grid;place-items:center}
+.btn.icon svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .link{background:none;border:0;padding:0;color:var(--brand-text);font-weight:600;text-decoration:underline;text-underline-offset:2px}
 
 #progress{height:2px;background:transparent}
@@ -172,6 +175,7 @@ details pre{margin:0;padding:12px 14px;border-top:1px solid var(--line);font:12p
   <div class="who" id="who"></div>
   <button class="btn" id="refresh" disabled>Re-read</button>
   <button class="btn primary" id="connect">Connect headset</button>
+  <button class="btn icon" id="theme" type="button"></button>
 </header>
 <div id="progress"></div>
 <div id="notice" hidden role="alert"></div>
@@ -202,6 +206,6 @@ details pre{margin:0;padding:12px 14px;border-top:1px solid var(--line);font:12p
   </section>
   <section class="view" id="v-raw"><div class="page"><div class="wrap" id="raw"></div></div></section>
 </main>
-<script src="main.js?v=3"></script>
+<script src="main.js?v=4"></script>
 </body>
 </html>
