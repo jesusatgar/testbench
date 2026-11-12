@@ -1,0 +1,27 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.vrexpert.bench'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.vrexpert.bench'
+        minSdk 26
+        // Pico OS is Android 10-12. Targeting 29 keeps background microphone and
+        // storage rules relaxed, which this bench tool relies on.
+        targetSdk 29
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+}
