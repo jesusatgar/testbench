@@ -8,7 +8,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="VR Expert Bench">
+        android:label="Headset Bench">
 
         <activity
             android:name=".MainActivity"

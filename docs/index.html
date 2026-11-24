@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>VR Expert Diagnostics</title>
+<title>Headset Diagnostics</title>
 <meta name="theme-color" content="#ff6a00">
-<script>try{var t=localStorage.getItem("vre-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<script>try{var t=localStorage.getItem("hb-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-/* ===== VR Expert brand tokens: orange + white (light) / orange + black (dark) ===== */
+/* ===== Brand tokens: orange + white (light) / orange + black (dark) ===== */
 :root{
   --brand:#ff6a00;        /* orange: buttons, active tab, selection */
   --brand-ink:#111111;    /* text on orange */
@@ -166,6 +166,45 @@ details{border:1px solid var(--line);border-radius:8px;background:var(--surface)
 details summary{padding:10px 14px;cursor:pointer;font-weight:600}
 details pre{margin:0;padding:12px 14px;border-top:1px solid var(--line);font:12px/1.5 var(--mono);overflow:auto;max-height:360px;color:var(--muted)}
 
+
+/* ---- cases and notes ---- */
+.case{margin-top:26px;padding:18px 20px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.case h2{font-size:15px;margin-bottom:4px}
+.case-head p,.case>div>p{color:var(--muted);font-size:13px;max-width:70ch}
+.case-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px 28px;margin-top:14px}
+.field{display:grid;gap:6px;margin-bottom:14px;min-width:0}
+.field>span{font-weight:600;font-size:13px}
+.field input[type=text],.field input[type=email],.field input[type=password],.field textarea,.cases-bar input,.cases-bar select{background:var(--sunken);border:1px solid transparent;border-radius:6px;color:var(--ink);padding:8px 10px;font:inherit;width:100%}
+.field textarea{resize:vertical;min-height:72px}
+.field input:focus,.field textarea:focus,.cases-bar input:focus,.cases-bar select:focus{border-color:var(--brand);outline:0}
+.radios,.checks{display:grid;gap:6px}
+.checks{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.opt{display:flex;gap:8px;align-items:flex-start;font-weight:400;font-size:13px}
+.opt input{margin-top:3px;accent-color:var(--brand)}
+.case-foot{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.cases-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.cases-bar input{flex:1;min-width:220px;width:auto}
+.cases-bar select{width:auto}
+.cases-where{color:var(--muted);font-size:13px;margin:12px 0}
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.cases-table{width:100%;border-collapse:collapse;font-size:13px}
+.cases-table th{text-align:left;color:var(--muted);font-weight:600;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+.cases-table td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.cases-table tbody tr{cursor:pointer}
+.cases-table tbody tr:hover,.cases-table tbody tr:focus-visible{background:var(--sunken)}
+.cases-table tbody tr:last-child td{border-bottom:0}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-weight:600;font-size:12px;white-space:nowrap}
+.pill[data-s="ok"]{background:var(--ok-bg);color:var(--ok)}
+.pill[data-s="warn"]{background:var(--warn-bg);color:var(--warn)}
+.pill[data-s="fail"]{background:var(--bad-bg);color:var(--bad)}
+.pill[data-s="na"]{background:var(--na-bg);color:var(--na)}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);padding:22px;width:min(380px,calc(100% - 32px))}
+dialog::backdrop{background:#0008}
+dialog h2{font-size:17px;margin-bottom:6px}
+dialog p{color:var(--muted);font-size:13px;margin-bottom:14px}
+#login-error{color:var(--bad);min-height:1.2em;margin:0 0 8px}
+.dialog-actions{display:flex;gap:8px;justify-content:flex-end}
+
 @media (max-width:900px){
   .side{display:none}
   .cols{grid-template-columns:1fr}
@@ -177,10 +216,11 @@ details pre{margin:0;padding:12px 14px;border-top:1px solid var(--line);font:12p
 </head>
 <body>
 <header>
-  <div class="brand">VR Expert<span>Diagnostics</span></div>
+  <div class="brand">Headset<span>Diagnostics</span></div>
   <div class="who" id="who"></div>
   <button class="btn" id="open" type="button">Open report</button>
   <button class="btn" id="refresh" disabled>Re-read</button>
+  <button class="btn" id="account" type="button" hidden>Sign in</button>
   <button class="btn primary" id="connect">Connect headset</button>
   <button class="btn icon" id="theme" type="button"></button>
 </header>
@@ -188,6 +228,7 @@ details pre{margin:0;padding:12px 14px;border-top:1px solid var(--line);font:12p
 <div id="notice" hidden role="alert"></div>
 <nav role="tablist">
   <button role="tab" aria-selected="true" data-tab="overview">Overview</button>
+  <button role="tab" aria-selected="false" data-tab="cases">Cases</button>
   <button role="tab" aria-selected="false" data-tab="props">Properties</button>
   <button role="tab" aria-selected="false" data-tab="raw">Raw output</button>
 </nav>
@@ -211,10 +252,22 @@ details pre{margin:0;padding:12px 14px;border-top:1px solid var(--line);font:12p
     </div>
     <aside class="drawer" id="drawer" aria-live="polite"></aside>
   </section>
+  <section class="view" id="v-cases"><div class="page"><div class="wrap" id="cases"></div></div></section>
   <section class="view" id="v-raw"><div class="page"><div class="wrap" id="raw"></div></div></section>
 </main>
+<dialog id="login">
+  <form id="login-form" autocomplete="on">
+    <h2>Sign in</h2>
+    <p>Use the account your administrator created for you. It lets you share cases with the team.</p>
+    <label class="field"><span>Email</span><input id="login-email" type="email" autocomplete="username" required></label>
+    <label class="field"><span>Password</span><input id="login-password" type="password" autocomplete="current-password" required></label>
+    <p id="login-error" role="alert"></p>
+    <div class="dialog-actions"><button class="btn" id="login-cancel" type="button">Cancel</button><button class="btn primary" id="login-submit" type="submit">Sign in</button></div>
+  </form>
+</dialog>
 <input type="file" id="apk" accept=".apk" hidden>
 <input type="file" id="report" accept=".json,application/json" hidden>
-<script src="main.js?v=12"></script>
+<script src="config.js"></script>
+<script src="main.js?v=13"></script>
 </body>
 </html>

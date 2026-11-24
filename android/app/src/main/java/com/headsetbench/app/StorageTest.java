@@ -1,4 +1,4 @@
-package com.vrexpert.bench;
+package com.headsetbench.app;
 
 import android.content.Context;
 
@@ -22,7 +22,7 @@ final class StorageTest {
         if (dir.getUsableSpace() < (SIZE_MB + 100L) * 1024 * 1024) {
             return r.set("na", "", "Not enough free space for the storage test.");
         }
-        File f = new File(dir, "vre-storage.bin");
+        File f = new File(dir, "hb-storage.bin");
         byte[] chunk = new byte[1024 * 1024];
         new Random(42).nextBytes(chunk);
         CRC32 wcrc = new CRC32();

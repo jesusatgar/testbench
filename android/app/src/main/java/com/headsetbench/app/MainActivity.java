@@ -1,4 +1,4 @@
-package com.vrexpert.bench;
+package com.headsetbench.app;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -27,14 +27,14 @@ public class MainActivity extends Activity {
         root.setPadding(pad, pad, pad, pad);
 
         TextView title = new TextView(this);
-        title.setText("VR Expert Bench");
+        title.setText("Headset Bench");
         title.setTextSize(22);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         root.addView(title);
 
         TextView hint = new TextView(this);
         hint.setText("Put the headset on a still surface, keep it above 30% or plugged in, then run the tests. "
-                + "The results are read by the VR Expert Diagnostics web page.");
+                + "The results are read by the Headset Diagnostics web page.");
         root.addView(hint);
 
         Button run = new Button(this);

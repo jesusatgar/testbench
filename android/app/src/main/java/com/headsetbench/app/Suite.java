@@ -1,4 +1,4 @@
-package com.vrexpert.bench;
+package com.headsetbench.app;
 
 import android.content.Context;
 import android.os.Build;
@@ -17,7 +17,7 @@ import java.util.List;
 
 /** Runs the selected tests one after another and keeps result.json up to date. */
 final class Suite {
-    static final String TAG = "VREBENCH";
+    static final String TAG = "HBBENCH";
     static final String VERSION = "0.1.0";
     // Stress goes last: it heats the headset and would skew the other tests.
     static final List<String> ALL = Arrays.asList("imu", "drift", "proximity", "audio", "storage", "stress");

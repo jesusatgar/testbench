@@ -1,4 +1,4 @@
-package com.vrexpert.bench;
+package com.headsetbench.app;
 
 import android.content.Context;
 import android.hardware.Sensor;
@@ -51,7 +51,7 @@ final class DriftTest {
             public void onAccuracyChanged(Sensor sensor, int accuracy) {
             }
         };
-        HandlerThread ht = new HandlerThread("vre-drift");
+        HandlerThread ht = new HandlerThread("hb-drift");
         ht.start();
         sm.registerListener(l, s, SensorManager.SENSOR_DELAY_GAME, new Handler(ht.getLooper()));
         Thread.sleep(seconds * 1000L);

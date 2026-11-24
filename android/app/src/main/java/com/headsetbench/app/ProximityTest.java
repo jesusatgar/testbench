@@ -1,4 +1,4 @@
-package com.vrexpert.bench;
+package com.headsetbench.app;
 
 import android.content.Context;
 import android.hardware.Sensor;

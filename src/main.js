@@ -2,6 +2,7 @@ import { Adb, AdbDaemonTransport } from "@yume-chan/adb";
 import AdbWebCredentialStore from "@yume-chan/adb-credential-web";
 import { AdbDaemonWebUsbDeviceManager } from "@yume-chan/adb-daemon-webusb";
 import { SAMPLE_PROPS, SAMPLE_RAW, SAMPLE_BENCH } from "./sample.js";
+import * as store from "./store.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -31,6 +32,9 @@ const state = {
   bench: null,       // parsed result.json from the on-device test app
   benchRun: null,    // {text} while the tests are running
   stressSec: 120,
+  case: null,        // the saved case for the headset on screen (notes, outcome)
+  caseMsg: "",
+  cases: { list: [], shared: false, error: "", q: "", filter: "all" },
 };
 
 /* ---------- model profiles ---------- */
@@ -617,7 +621,7 @@ function verdictOf(checks) {
 
 function summaryText(checks, v) {
   const out = [
-    "VR Expert diagnostics",
+    "Headset diagnostics",
     `Model: ${prop("ro.product.model") || "—"}   Serial: ${prop("ro.serialno") || state.serial || "—"}`,
     `Firmware: ${prop("ro.build.display.id") || "—"}   Android ${prop("ro.build.version.release") || "—"}`,
     `Result: ${v.title} (${v.line})`,
@@ -642,7 +646,7 @@ function checkRow(c, compact) {
 
 /* ---------- on-device test app ---------- */
 
-const BENCH_PKG = "com.vrexpert.bench";
+const BENCH_PKG = "com.headsetbench.app";
 const BENCH_DIR = `/sdcard/Android/data/${BENCH_PKG}/files`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -681,7 +685,7 @@ async function pushFile(path, bytes) {
 // Uses the APK published next to this page; falls back to a file picker (for example when opened locally).
 async function getApk() {
   try {
-    const r = await fetch("vre-bench.apk", { cache: "no-store" });
+    const r = await fetch("bench.apk", { cache: "no-store" });
     if (r.ok) return new Uint8Array(await r.arrayBuffer());
   } catch { /* fall through */ }
   const input = $("apk");
@@ -704,8 +708,8 @@ async function runBench() {
   try {
     const apk = await getApk();
     say("Installing the test app…");
-    await pushFile("/data/local/tmp/vre-bench.apk", apk);
-    const install = () => sh("pm install -r -g -t /data/local/tmp/vre-bench.apk");
+    await pushFile("/data/local/tmp/bench.apk", apk);
+    const install = () => sh("pm install -r -g -t /data/local/tmp/bench.apk");
     let inst = await install();
     if (/INSTALL_FAILED_UPDATE_INCOMPATIBLE/.test(inst)) {
       // The installed copy was signed with a different key. Replace it.
@@ -713,7 +717,7 @@ async function runBench() {
       await sh(`pm uninstall ${BENCH_PKG}`);
       inst = await install();
     }
-    await sh("rm -f /data/local/tmp/vre-bench.apk");
+    await sh("rm -f /data/local/tmp/bench.apk");
     if (!/Success/.test(inst)) throw new Error("install failed: " + inst);
     await sh(`rm -f ${BENCH_DIR}/result.json`);
     const started = await sh(`am start-foreground-service -n ${BENCH_PKG}/.BenchService --es suite all --ei stress ${state.stressSec}`);
@@ -732,6 +736,7 @@ async function runBench() {
     if (!doc || doc.state !== "done") throw new Error("the tests did not finish in time");
     state.bench = doc;
     setStatus("");
+    await persistCase();
   } catch (e) {
     setStatus("Device tests failed: " + e, "err");
   } finally {
@@ -786,9 +791,10 @@ function renderOverview() {
   if (prof) dl.prepend(el("dt", { text: "Profile" }), el("dd", { text: prof.label + (prof.tested ? "" : " (not validated yet)") }));
   const scope = "Not covered yet: display (dead pixels), controllers and tracking. Those need a VR test scene." + (prof?.note ? " " + prof.note : "");
 
-  o.replaceChildren(verdict, benchPanel(),
+  o.replaceChildren(...[verdict, benchPanel(),
     el("div", { class: "cols" }, left, el("aside", {}, el("h2", { text: "Device", style: "font-size:15px;margin-bottom:10px" }), dl)),
-    el("p", { class: "scope", text: scope }));
+    casePanel(),
+    el("p", { class: "scope", text: scope })].filter(Boolean));
 }
 
 function renderRaw() {
@@ -799,7 +805,7 @@ function renderRaw() {
 }
 
 function renderAll() {
-  renderDevice(); renderCats(); renderRows(); renderDrawer(); renderOverview(); renderRaw();
+  renderDevice(); renderCats(); renderRows(); renderDrawer(); renderOverview(); renderRaw(); renderCases();
   $("exp-json").disabled = $("exp-csv").disabled = !state.props.length;
 }
 
@@ -832,18 +838,18 @@ async function connect() {
     state.sample = false;
     state.loaded = null;
     $("refresh").disabled = false;
-    await readAll();
+    await readAll(true);
   } catch (e) {
     setStatus("Error: " + e, "err");
   }
 }
 
-async function readAll() {
+async function readAll(fresh = false) {
   if (!state.adb) return;
   setStatus("", "busy");
+  if (fresh) { state.bench = null; state.case = null; state.caseMsg = ""; }
   state.props = parseGetprop(await sh("getprop"));
   state.raw = {};
-  state.bench = null;
   renderAll();
   for (const [label, cmd] of RAW_COMMANDS) {
     setStatus("", "busy");
@@ -851,12 +857,14 @@ async function readAll() {
   }
   renderAll();
   setStatus("");
+  await persistCase();
 }
 
 function loadSample() {
   state.adb = null;
   state.sample = true;
   state.loaded = null;
+  state.case = null;
   state.serial = "SAMPLE0000";
   state.props = parseGetprop(SAMPLE_PROPS);
   state.raw = { ...SAMPLE_RAW };
@@ -866,13 +874,251 @@ function loadSample() {
   setStatus("");
 }
 
+/* ---------- cases: saved results, notes and shared history ---------- */
+
+const OUTCOMES = [
+  ["", "Not set"],
+  ["matches", "The diagnosis matches the real problem"],
+  ["missed", "The diagnosis misses it: shows OK but the headset still has problems"],
+  ["false_alarm", "The diagnosis reports a problem but the headset is fine"],
+  ["unsure", "Not sure yet"],
+];
+const OUTCOME_SHORT = { matches: "Matched", missed: "Missed problem", false_alarm: "False alarm", unsure: "Unsure" };
+const SYMPTOMS = ["Tracking", "View drifts or rotates", "Display", "Audio", "Controllers", "Battery or charging", "Overheating", "Wi-Fi or Bluetooth", "Crashes or boot", "Other"];
+
+// Properties that can identify a customer's network are not stored with the case.
+const REDACT = /(^dhcp\.|^net\.(dns|tcp)|mac|ssid|bssid|ip_?addr|ipaddress|password|passwd|token|^wifi\.|^persist\.pvr\.wifi|^vendor\.nds\.)/i;
+
+const techName = () => { try { return localStorage.getItem("hb-tech") || ""; } catch { return ""; } };
+
+function reportDoc({ redact = false } = {}) {
+  const properties = {};
+  for (const p of state.props) if (!(redact && REDACT.test(p.key))) properties[p.key] = p.value;
+  return { date: state.loaded?.date || new Date().toISOString(), sample: state.sample, properties, raw: state.raw, deviceTests: state.bench };
+}
+
+/** Fields that come from the headset reading (kept in sync with the screen); notes are left alone. */
+function snapshotFields() {
+  const checks = computeChecks();
+  const v = verdictOf(checks);
+  return {
+    serial: prop("ro.serialno") || state.serial,
+    model: prop("ro.product.model"),
+    firmware: prop("ro.build.display.id"),
+    profile: profile()?.id || "",
+    verdict: v.state,
+    fails: checks.filter((c) => c.status === "fail").length,
+    warns: checks.filter((c) => c.status === "warn").length,
+    summary: checks.filter((c) => c.status !== "ok").map((c) => ({ name: c.name, status: c.status, value: c.value })),
+    report: reportDoc({ redact: true }),
+  };
+}
+
+function newCase() {
+  const now = new Date().toISOString();
+  return { id: crypto.randomUUID(), created_at: now, updated_at: now, tech: techName() || store.currentUser(),
+    outcome: "", symptoms: [], notes: "", resolution: "", ...snapshotFields() };
+}
+
+const savedWhere = (where) => (where === "shared" ? "Saved and shared with the team." : store.sharedConfigured() && !store.signedIn()
+  ? "Saved on this computer. Sign in to share it with the team." : "Saved on this computer.");
+
+/** Saves the headset reading as a case (creating it on first call). Never throws. */
+async function persistCase() {
+  if (state.sample || !state.props.length) return;
+  try {
+    if (!state.case) state.case = { ...newCase() };
+    else Object.assign(state.case, snapshotFields());
+    state.caseMsg = savedWhere(await store.saveCase(state.case));
+  } catch (e) {
+    state.caseMsg = "Could not save this case: " + (e.message || e);
+  }
+  await refreshCases();
+  renderOverview();
+}
+
+async function saveNotes(btn) {
+  const c = state.case;
+  if (!c) return;
+  btn.disabled = true;
+  try {
+    try { localStorage.setItem("hb-tech", c.tech || ""); } catch { /* storage blocked */ }
+    state.caseMsg = savedWhere(await store.saveCase(c, { notesOnly: true }));
+  } catch (e) {
+    state.caseMsg = "Could not save: " + (e.message || e);
+  }
+  const m = document.getElementById("case-msg");
+  if (m) m.textContent = state.caseMsg;
+  btn.disabled = false;
+  await refreshCases();
+}
+
+function casePanel() {
+  if (state.sample || !state.props.length) return null;
+  const c = state.case;
+  if (!c) {
+    return el("section", { class: "case" },
+      el("div", {}, el("h2", { text: "Case notes" }), el("p", { text: "This report is not saved as a case yet." })),
+      el("button", { class: "btn primary", text: "Save as case", onclick: async () => { state.case = newCase(); await persistCase(); } }));
+  }
+  const field = (label, node) => el("label", { class: "field" }, el("span", { text: label }), node);
+  const tech = el("input", { type: "text", id: "case-tech", placeholder: "Your name", autocomplete: "off" });
+  tech.value = c.tech || "";
+  tech.addEventListener("input", () => { c.tech = tech.value; });
+  const text = (key, ph) => {
+    const t = el("textarea", { rows: "3", placeholder: ph });
+    t.value = c[key] || "";
+    t.addEventListener("input", () => { c[key] = t.value; });
+    return t;
+  };
+  const outcome = el("div", { class: "radios", role: "radiogroup", "aria-label": "How did the diagnosis compare with reality?" },
+    ...OUTCOMES.map(([v, label]) => {
+      const i = el("input", { type: "radio", name: "outcome", value: v });
+      if ((c.outcome || "") === v) i.checked = true;
+      i.addEventListener("change", () => { c.outcome = v; });
+      return el("label", { class: "opt" }, i, el("span", { text: label }));
+    }));
+  const symptoms = el("div", { class: "checks" },
+    ...SYMPTOMS.map((sy) => {
+      const i = el("input", { type: "checkbox", value: sy });
+      if ((c.symptoms || []).includes(sy)) i.checked = true;
+      i.addEventListener("change", () => { c.symptoms = i.checked ? [...(c.symptoms || []), sy] : (c.symptoms || []).filter((x) => x !== sy); });
+      return el("label", { class: "opt" }, i, el("span", { text: sy }));
+    }));
+  const earlier = state.cases.list.filter((x) => x.serial && x.serial === c.serial && x.id !== c.id);
+  const msg = el("span", { id: "case-msg", class: "bench-status", text: state.caseMsg });
+  return el("section", { class: "case" },
+    el("div", { class: "case-head" }, el("h2", { text: "Case notes" }),
+      el("p", { text: "Add what you find after the diagnosis. Notes are saved with this headset's results so they can be reviewed later." })),
+    el("div", { class: "case-grid" },
+      el("div", {}, field("What did the diagnosis get right or wrong?", outcome), field("Symptoms reported or observed", symptoms)),
+      el("div", {}, field("Notes", text("notes", "For example: all checks passed, but tracking is still lost when the controllers move.")),
+        field("Repair or resolution", text("resolution", "For example: replaced the IMU board; gyro bias back to normal.")),
+        field("Technician", tech))),
+    el("div", { class: "case-foot" },
+      el("button", { class: "btn primary", text: "Save notes", onclick: (e) => saveNotes(e.currentTarget) }), msg,
+      earlier.length ? el("button", { class: "link", style: "margin-left:auto", text: `${earlier.length} earlier ${earlier.length === 1 ? "case" : "cases"} for this serial`,
+        onclick: () => { state.cases.q = c.serial; showTab("cases"); renderCases(); } }) : null));
+}
+
+async function refreshCases() {
+  const r = await store.listCases();
+  state.cases.list = r.cases.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  state.cases.shared = r.shared;
+  state.cases.error = r.error || "";
+  renderCases();
+}
+
+const when = (iso) => { try { return new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }); } catch { return iso || ""; } };
+
+function renderCases() {
+  const box = $("cases");
+  if (!box) return;
+  const cs = state.cases;
+  const q = cs.q.trim().toLowerCase();
+  const rows = cs.list.filter((c) => {
+    if (cs.filter === "none" && c.outcome) return false;
+    if (cs.filter === "mismatch" && !["missed", "false_alarm"].includes(c.outcome)) return false;
+    if (q && !`${c.serial} ${c.model} ${c.firmware} ${c.tech} ${c.notes} ${c.resolution} ${(c.symptoms || []).join(" ")}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  const where = store.sharedConfigured()
+    ? (store.signedIn() ? (cs.shared ? `Shared with the team as ${store.currentUser()}.` : "Could not reach the shared storage; showing this computer's cases.")
+      : "Sign in to see and share cases with your team. Cases are saved on this computer meanwhile.")
+    : "Cases are saved on this computer only. To share them with your team, set up shared storage (see the README).";
+
+  const search = el("input", { type: "search", id: "cases-q", placeholder: "Search serial, model, technician, notes", autocomplete: "off", spellcheck: "false", "aria-label": "Search cases" });
+  search.value = cs.q;
+  search.addEventListener("input", () => { cs.q = search.value; renderCases(); const f = document.getElementById("cases-q"); f?.focus(); f?.setSelectionRange(f.value.length, f.value.length); });
+  const filter = el("select", { id: "cases-filter", "aria-label": "Filter cases" },
+    ...[["all", "All cases"], ["none", "No outcome yet"], ["mismatch", "Missed or false alarm"]].map(([v, t]) => el("option", { value: v, text: t })));
+  filter.value = cs.filter;
+  filter.addEventListener("change", () => { cs.filter = filter.value; renderCases(); });
+
+  const table = el("table", { class: "cases-table" },
+    el("thead", {}, el("tr", {}, ...["Date", "Serial", "Model", "Firmware", "Result", "Outcome", "Technician", "Symptoms"].map((h) => el("th", { text: h })))),
+    el("tbody", {}, ...rows.map((c) => {
+      const tr = el("tr", { tabindex: "0", "aria-label": `Open case ${c.serial}` },
+        el("td", { text: when(c.created_at) }), el("td", { class: "mono", text: c.serial || "" }), el("td", { text: c.model || "" }), el("td", { text: c.firmware || "" }),
+        el("td", {}, el("span", { class: "pill", "data-s": c.verdict || "na", text: { ok: "Healthy", warn: "Attention", fail: "Not healthy", na: "No data" }[c.verdict] || "No data" })),
+        el("td", { text: OUTCOME_SHORT[c.outcome] || "" }), el("td", { text: c.tech || "" }), el("td", { text: (c.symptoms || []).join(", ") }));
+      const open = () => openCaseById(c.id);
+      tr.addEventListener("click", open);
+      tr.addEventListener("keydown", (e) => { if (e.key === "Enter") open(); });
+      return tr;
+    })));
+
+  box.replaceChildren(
+    el("div", { class: "cases-bar" }, search, filter,
+      el("button", { class: "btn", text: "Refresh", onclick: refreshCases }),
+      el("button", { class: "btn", text: "Export all", onclick: () => download(`cases-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(cs.list, null, 2), "application/json") })),
+    el("p", { class: "cases-where", text: where + (cs.error ? " " + cs.error : "") }),
+    rows.length ? el("div", { class: "table-wrap" }, table)
+      : el("div", { class: "msg", text: cs.list.length ? "No cases match." : "No cases yet. Every diagnosis is saved here automatically." }));
+}
+
+async function openCaseById(id) {
+  try {
+    const c = await store.openCase(id);
+    if (!c?.report) return setStatus("That case has no stored report on this computer.", "err");
+    loadReport(c.report, c);
+    state.caseMsg = "";
+    showTab("overview");
+    renderOverview();
+  } catch (e) {
+    setStatus("Could not open the case: " + (e.message || e), "err");
+  }
+}
+
+function showTab(name) {
+  document.querySelectorAll("nav [data-tab]").forEach((x) => x.setAttribute("aria-selected", String(x.dataset.tab === name)));
+  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === "v-" + name));
+}
+
+/* ---------- sign-in to the shared storage ---------- */
+
+function paintAccount() {
+  const b = $("account");
+  b.hidden = !store.sharedConfigured();
+  b.textContent = store.signedIn() ? "Sign out" : "Sign in";
+  b.title = store.signedIn() ? store.currentUser() : "Sign in to share cases with your team";
+}
+
+$("account").onclick = async () => {
+  if (store.signedIn()) { store.signOut(); paintAccount(); await refreshCases(); renderOverview(); return; }
+  $("login-error").textContent = "";
+  $("login").showModal();
+  $("login-email").focus();
+};
+$("login-cancel").onclick = () => $("login").close();
+$("login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = $("login-submit");
+  btn.disabled = true;
+  try {
+    await store.signIn($("login-email").value.trim(), $("login-password").value);
+    $("login-password").value = "";
+    $("login").close();
+    paintAccount();
+    await store.syncPending();
+    await refreshCases();
+    renderOverview();
+  } catch (err) {
+    $("login-error").textContent = err.message || String(err);
+  }
+  btn.disabled = false;
+});
+
 /* ---------- saved reports ---------- */
 
-function loadReport(doc) {
+function loadReport(doc, saved = null) {
   if (!doc || typeof doc.properties !== "object") throw new Error("This file is not a report exported from this page.");
   state.adb = null;
   state.sample = !!doc.sample;
   state.loaded = { date: doc.date || "" };
+  state.case = saved;
+  state.caseMsg = "";
   state.props = Object.entries(doc.properties).map(([k, v]) => makeProp(k, String(v))).sort((a, b) => a.key.localeCompare(b.key));
   state.raw = doc.raw || {};
   state.bench = doc.deviceTests || null;
@@ -910,12 +1156,8 @@ $("kinds").addEventListener("click", (e) => {
   for (const x of $("kinds").children) x.setAttribute("aria-pressed", String(x === b));
   renderRows();
 });
-document.querySelectorAll("nav [data-tab]").forEach((b) => b.addEventListener("click", () => {
-  document.querySelectorAll("nav [data-tab]").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
-  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === "v-" + b.dataset.tab));
-}));
-$("exp-json").onclick = () =>
-  download(`props-${stamp()}.json`, JSON.stringify({ date: new Date().toISOString(), sample: state.sample, properties: Object.fromEntries(state.props.map((p) => [p.key, p.value])), raw: state.raw, deviceTests: state.bench }, null, 2), "application/json");
+document.querySelectorAll("nav [data-tab]").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+$("exp-json").onclick = () => download(`props-${stamp()}.json`, JSON.stringify(reportDoc(), null, 2), "application/json");
 $("exp-csv").onclick = () => {
   const esc = (s) => `"${String(s).replace(/"/g, '""')}"`;
   download(`props-${stamp()}.csv`, ["key,value,category", ...state.props.map((p) => [p.key, p.value, p.cat].map(esc).join(","))].join("\n"), "text/csv");
@@ -939,7 +1181,7 @@ function paintThemeButton() {
 $("theme").onclick = () => {
   const next = isDark() ? "light" : "dark";
   document.documentElement.dataset.theme = next;
-  try { localStorage.setItem("vre-theme", next); } catch {}
+  try { localStorage.setItem("hb-theme", next); } catch {}
   paintThemeButton();
 };
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paintThemeButton);
@@ -947,3 +1189,5 @@ paintThemeButton();
 
 if (!navigator.usb) setStatus("This browser does not support WebUSB. Use Chrome or Edge to connect a headset. ", "err");
 renderAll();
+paintAccount();
+store.syncPending().then(refreshCases).catch(() => refreshCases());

@@ -1,4 +1,4 @@
-package com.vrexpert.bench;
+package com.headsetbench.app;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -16,7 +16,7 @@ import java.util.List;
 /**
  * Runs the suite in the foreground so it keeps going if the headset screen turns off.
  * Start from adb with:
- *   am start-foreground-service -n com.vrexpert.bench/.BenchService --es suite all --ei stress 120
+ *   am start-foreground-service -n com.headsetbench.app/.BenchService --es suite all --ei stress 120
  */
 public class BenchService extends Service {
     private static volatile boolean running;
@@ -34,14 +34,14 @@ public class BenchService extends Service {
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         nm.createNotificationChannel(new NotificationChannel("bench", "Diagnostics", NotificationManager.IMPORTANCE_LOW));
         Notification n = new Notification.Builder(this, "bench")
-                .setContentTitle("VR Expert Bench")
+                .setContentTitle("Headset Bench")
                 .setContentText("Running device tests")
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .build();
         startForeground(1, n);
 
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        final PowerManager.WakeLock lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "vrexpert:bench");
+        final PowerManager.WakeLock lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "headsetbench:bench");
         lock.acquire((stress + 600) * 1000L);
 
         final Context ctx = getApplicationContext();
@@ -54,7 +54,7 @@ public class BenchService extends Service {
                 stopForeground(true);
                 stopSelf();
             }
-        }, "vre-suite").start();
+        }, "hb-suite").start();
         return START_NOT_STICKY;
     }
 

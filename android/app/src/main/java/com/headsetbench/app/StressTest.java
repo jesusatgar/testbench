@@ -1,4 +1,4 @@
-package com.vrexpert.bench;
+package com.headsetbench.app;
 
 import android.content.Context;
 import android.content.Intent;
@@ -53,7 +53,7 @@ final class StressTest {
                     sink = x;
                     counter.incrementAndGet();
                 }
-            }, "vre-stress-" + i);
+            }, "hb-stress-" + i);
             workers[i].start();
         }
 

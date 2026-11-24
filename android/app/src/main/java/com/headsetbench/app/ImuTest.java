@@ -1,4 +1,4 @@
-package com.vrexpert.bench;
+package com.headsetbench.app;
 
 import android.content.Context;
 import android.hardware.Sensor;
@@ -46,7 +46,7 @@ final class ImuTest {
 
         final List<float[]> a = new ArrayList<>();
         final List<float[]> g = new ArrayList<>();
-        HandlerThread ht = new HandlerThread("vre-imu");
+        HandlerThread ht = new HandlerThread("hb-imu");
         ht.start();
         Handler h = new Handler(ht.getLooper());
         SensorEventListener la = listener(a), lg = listener(g);

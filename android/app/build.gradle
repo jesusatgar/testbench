@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'com.vrexpert.bench'
+    namespace 'com.headsetbench.app'
     compileSdk 34
 
     defaultConfig {
-        applicationId 'com.vrexpert.bench'
+        applicationId 'com.headsetbench.app'
         minSdk 26
         // Pico OS is Android 10-12. Targeting 29 keeps background microphone and
         // storage rules relaxed, which this bench tool relies on.
@@ -20,9 +20,9 @@ android {
     // the same way and can update the version already installed on a headset.
     signingConfigs {
         debug {
-            storeFile file('vre-debug.keystore')
+            storeFile file('bench.keystore')
             storePassword 'android'
-            keyAlias 'vre'
+            keyAlias 'hb'
             keyPassword 'android'
         }
     }

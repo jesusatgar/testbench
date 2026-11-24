@@ -11,5 +11,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "vre-bench"
+rootProject.name = "headset-bench"
 include ":app"
